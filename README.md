@@ -15,3 +15,10 @@ Build a Bible API hosted on Cloudflare Workers
 - `R2_SECRET_ACCESS_KEY`
 - `R2_BUCKET_NAME`
 - `API_KEY`
+
+## Secrets
+Do not commit real secrets. For production, store `API_KEY` with:
+
+```
+wrangler secret put API_KEY
+```
