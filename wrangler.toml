@@ -1,0 +1,21 @@
+name = "bible-api"
+main = "src/index.ts"
+compatibility_date = "2024-04-01"
+
+# 1. R2 Bucket Binding
+[[r2_buckets]]
+binding = "BIBLE_BUCKET"
+bucket_name = "bible-api-storage-v1"
+
+# 2. KV Namespace Binding
+[[kv_namespaces]]
+binding = "BIBLE_KV"
+id = "48496f7b175446f5a77761563cce46be"
+
+# 3. Scheduled Worker (Verse of the Day - Runs every day at 8am UTC)
+[triggers]
+crons = ["0 8 * * *"]
+
+# 4. Observability
+[observability]
+enabled = true
