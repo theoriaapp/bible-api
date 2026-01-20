@@ -9,7 +9,16 @@ export async function auth(c: Context<{ Bindings: EnvWithApiKey }>, next: Next) 
   const expectedKey = c.env.API_KEY;
 
   if (!expectedKey || providedKey !== expectedKey) {
-    return c.json({ error: "Unauthorized" }, 401);
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Missing or invalid api-key header.",
+          hint: "Provide the api-key header with your API key."
+        }
+      },
+      401
+    );
   }
 
   return next();

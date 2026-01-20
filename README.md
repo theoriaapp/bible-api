@@ -15,6 +15,19 @@ Public OpenAPI JSON:
 Swagger UI:
 - `http://localhost:8787/docs`
 
+## Error codes
+All error responses use the shape:
+`{ "error": { "code": "SOME_CODE", "message": "...", "hint": "optional" } }`
+
+Common codes:
+- `UNAUTHORIZED` - Missing or invalid `api-key` header
+- `BIBLE_NOT_FOUND` - Unknown bible id (only `NKJV` is supported)
+- `INVALID_CHAPTER_ID` - Bad chapter format (expected `BOOK.CHAPTER`, e.g. `GEN.1`)
+- `INVALID_PASSAGE_ID` - Bad passage format (expected `BOOK.CHAPTER.START-BOOK.CHAPTER.END`)
+- `PASSAGE_CROSSES_CHAPTERS` - Passage must be within a single chapter
+- `PASSAGE_NOT_FOUND` - Passage does not exist in storage
+- `VOTD_NOT_SET` - Verse of the day not yet generated
+
 ## Environment variables
 - `R2_ENDPOINT` - `https://<accountid>.r2.cloudflarestorage.com`
 - `R2_ACCESS_KEY_ID`
