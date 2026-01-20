@@ -65,6 +65,25 @@ const openApiSpec = {
   }
 };
 
+app.get("/openapi.json", (c) => c.json(openApiSpec));
+
+app.get("/openapi", (c) => {
+  return c.html(`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bible API OpenAPI</title>
+  </head>
+  <body>
+    <h1>Bible API OpenAPI</h1>
+    <p>Download the OpenAPI JSON here:</p>
+    <p><a href="/openapi.json">/openapi.json</a></p>
+    <p>Base URL for API calls: <code>/v1</code></p>
+  </body>
+</html>`);
+});
+
 app.use("/v1/*", auth);
 
 app.get("/v1/openapi.json", (c) => c.json(openApiSpec));
