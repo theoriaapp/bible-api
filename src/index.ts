@@ -11,6 +11,7 @@ type Env = {
   BIBLE_BUCKET: R2Bucket;
   BIBLE_KV: KVNamespace;
   API_KEY: string;
+  PUBLIC_BASE_URL?: string;
 };
 
 const app = new Hono<{ Bindings: Env }>();
@@ -544,9 +545,10 @@ async function fetchR2Json(
   });
 }
 
-app.get(
-  "/openapi.json",
-  openAPISpecs(app as unknown as Hono, {
+app.get("/openapi.json", (c) => {
+  const origin = new URL(c.req.url).origin;
+  const baseUrl = c.env.PUBLIC_BASE_URL || origin;
+  const handler = openAPISpecs(app as unknown as Hono, {
     documentation: {
       info: {
         title: "Bible API",
@@ -564,12 +566,13 @@ app.get(
       },
       security: [{ ApiKeyAuth: [] }],
       servers: [
-        { url: "http://localhost:8787", description: "Local" },
-        { url: "https://<your-worker>.workers.dev", description: "Production" }
+        { url: baseUrl, description: "Current" },
+        { url: `${baseUrl}/v1`, description: "Current (v1 base)" }
       ]
     }
-  })
-);
+  });
+  return handler(c as unknown as Parameters<typeof handler>[0]);
+});
 
 app.get("/docs", (c) => {
   return c.html(`<!doctype html>

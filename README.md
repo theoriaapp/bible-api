@@ -14,6 +14,7 @@ Public OpenAPI JSON:
 - `http://localhost:8787/openapi.json`
 Swagger UI:
 - `http://localhost:8787/docs`
+Set `PUBLIC_BASE_URL` (optional) to force the OpenAPI `servers` URL in production.
 
 ## Error codes
 All error responses use the shape:
