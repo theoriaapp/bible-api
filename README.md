@@ -9,6 +9,12 @@ Build a Bible API hosted on Cloudflare Workers
 5. Set `API_KEY` in `wrangler.toml` (or run `wrangler dev --var API_KEY=...`)
 6. Deploy: `npm run deploy`
 
+## OpenAPI docs (Hono OpenAPI)
+Public OpenAPI JSON:
+- `http://localhost:8787/openapi.json`
+Swagger UI:
+- `http://localhost:8787/docs`
+
 ## Environment variables
 - `R2_ENDPOINT` - `https://<accountid>.r2.cloudflarestorage.com`
 - `R2_ACCESS_KEY_ID`
