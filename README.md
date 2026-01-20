@@ -28,3 +28,13 @@ Do not commit real secrets. For production, store `API_KEY` with:
 ```
 wrangler secret put API_KEY
 ```
+
+## Seed initial VOTD (production)
+Use this once to set a starting Verse of the Day in the production KV namespace:
+
+```
+npx wrangler kv key put current_votd \
+'{"data":{"id":"GEN.1.1","text":"In the beginning God created the heavens and the earth.","bibleId":"NKJV","bookId":"GEN","chapter":"1"},"meta":{}}' \
+--binding BIBLE_KV \
+--remote
+```
