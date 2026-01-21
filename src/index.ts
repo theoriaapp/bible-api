@@ -82,7 +82,7 @@ const errorExamples = {
       error: {
         code: "INVALID_SEARCH_QUERY",
         message:
-          "Invalid search query. Examples: JHN6:12-15, JHN6-12, JHN.21.25-ACT.1.3."
+          "Invalid search query. Examples: JHN6:12-15, JHN6-12, John 6:12-15 NKJV."
       }
     }
   }
@@ -393,7 +393,7 @@ app.get(
   describeRoute({
     summary: "Search passages",
     description:
-      "Search passages with fuzzy input. Examples: JHN6:12-15, JHN6-12, JHN.21.25-ACT.1.3.",
+      "Search passages with flexible input. Examples: JHN6:12-15, JHN6-12, John 6:12-15 NKJV, JHN.21.25-ACT.1.3.",
     responses: {
       200: {
         description: "OK",
@@ -669,7 +669,8 @@ function parseSearchQuery(
 ):
   | { passageIds: string[]; normalized: string }
   | { error: { code: string; message: string } } {
-  const parts = query
+  const cleaned = normalizeSearchQuery(query);
+  const parts = cleaned
     .split(",")
     .map((part) => part.trim())
     .filter(Boolean);
@@ -679,7 +680,7 @@ function parseSearchQuery(
       error: {
         code: "INVALID_SEARCH_QUERY",
         message:
-          "Invalid search query. Examples: JHN6:12-15, JHN6-12, JHN.21.25-ACT.1.3."
+          "Invalid search query. Examples: JHN6:12-15, JHN6-12, John 6:12-15 NKJV."
       }
     };
   }
@@ -692,7 +693,7 @@ function parseSearchQuery(
         error: {
           code: "INVALID_SEARCH_QUERY",
           message:
-            "Invalid search query. Examples: JHN6:12-15, JHN6-12, JHN.21.25-ACT.1.3."
+          "Invalid search query. Examples: JHN6:12-15, JHN6-12, John 6:12-15 NKJV."
         }
       };
     }
@@ -726,14 +727,32 @@ function parseSearchSegment(input: string): string | null {
 function parseSearchRef(
   token: string
 ): { bookId: string; chapter: number; verse?: number } | null {
-  const digitIndex = token.search(/\d/);
-  if (digitIndex === -1) return null;
-  const bookToken = token.slice(0, digitIndex);
-  const rest = token.slice(digitIndex);
+  const tokens = token
+    .replace(/[^\w:.]+/g, " ")
+    .trim()
+    .toUpperCase()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!tokens.length) return null;
+
+  let normalized = "";
+  const last = tokens[tokens.length - 1];
+  const secondLast = tokens[tokens.length - 2];
+  const lastIsNumber = /^\d+$/.test(last);
+  const secondLastIsNumber = secondLast ? /^\d+$/.test(secondLast) : false;
+
+  if (tokens.length >= 3 && lastIsNumber && secondLastIsNumber) {
+    const bookToken = tokens.slice(0, -2).join("");
+    normalized = `${bookToken}${secondLast}:${last}`;
+  } else {
+    normalized = tokens.join("");
+  }
+
+  const match = normalized.match(/^([A-Z0-9]+?)(\d+)(?:[.:](\d+))?$/);
+  if (!match) return null;
+  const [, bookToken, chapterStr, verseStr] = match;
   const bookId = resolveBookId(bookToken);
   if (!bookId) return null;
-  const normalized = rest.replace(":", ".");
-  const [chapterStr, verseStr] = normalized.split(".");
   const chapter = Number(chapterStr);
   if (Number.isNaN(chapter) || chapter < 1) return null;
   if (chapter > (bookIdToChapters.get(bookId) ?? 0)) return null;
@@ -767,6 +786,18 @@ function parseSearchEndRef(
   const verse = Number(normalized);
   if (Number.isNaN(verse) || verse < 1) return null;
   return { bookId: start.bookId, chapter: start.chapter, verse };
+}
+
+function normalizeSearchQuery(query: string) {
+  let cleaned = query.replace(/[–—]/g, "-");
+  cleaned = cleaned.replace(/\(([^)]+)\)$/g, " ");
+  cleaned = cleaned.replace(/\bVERSION\s*=\s*[A-Z0-9]+\b/gi, " ");
+  cleaned = cleaned.replace(
+    /\b(NKJV|KJV|NIV|ESV|NLT|NASB|CSB|RSV|NRSV|NRSVUE|NLV|GNT|CEV)\b/gi,
+    " "
+  );
+  cleaned = cleaned.replace(/\s+/g, " ").trim();
+  return cleaned;
 }
 
 async function resolvePassages(

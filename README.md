@@ -39,6 +39,7 @@ Passage examples:
 Search endpoint:
 - `GET /v1/search?q=JHN6:12-15`
 - `GET /v1/search?q=JHN6-12`
+- `GET /v1/search?q=John 6:12-15 NKJV`
 - `GET /v1/search?q=JHN.21.25-ACT.1.3`
 - `GET /v1/search?q=JHN6:12-15,GEN1:1-3`
 
