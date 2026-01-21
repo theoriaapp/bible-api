@@ -17,8 +17,7 @@ preview_id = "7945621e446845dd997b8242ccfe9741"
 [triggers]
 # Cloudflare cron is UTC. Sydney is UTC+10 (AEST) or UTC+11 (AEDT).
 # This is set to 8:30am AEDT (UTC+11)
-# crons = ["30 21 * * *"]
-crons = ["56 21 * * *"]
+crons = ["30 21 * * *"]
 
 # 4. Observability
 [observability]
