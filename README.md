@@ -25,9 +25,15 @@ Common codes:
 - `BIBLE_NOT_FOUND` - Unknown bible id (only `NKJV` is supported)
 - `INVALID_CHAPTER_ID` - Bad chapter format (expected `BOOK.CHAPTER`, e.g. `GEN.1`)
 - `INVALID_PASSAGE_ID` - Bad passage format (expected `BOOK.CHAPTER.START-BOOK.CHAPTER.END`)
-- `PASSAGE_CROSSES_CHAPTERS` - Passage must be within a single chapter
+- `INVALID_PASSAGE_RANGE` - Passage end must be after the start
 - `PASSAGE_NOT_FOUND` - Passage does not exist in storage
 - `VOTD_NOT_SET` - Verse of the day not yet generated
+
+Passage examples:
+- Same chapter: `GEN.1.1-GEN.1.5`
+- Shorthand end verse: `JHN.1.12-15`
+- Multi-chapter (same book): `JHN.1.12-2.5`
+- Multi-book: `JHN.21.25-ACT.1.3`
 
 ## Environment variables
 - `R2_ENDPOINT` - `https://<accountid>.r2.cloudflarestorage.com`
