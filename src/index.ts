@@ -14,7 +14,7 @@ type Env = {
   PUBLIC_BASE_URL?: string;
 };
 
-const app = new Hono<{ Bindings: Env }>();
+export const app = new Hono<{ Bindings: Env }>();
 
 const bibleIdParam = z.object({ bibleId: z.string() });
 const chapterParam = z.object({ bibleId: z.string(), chapterId: z.string() });
