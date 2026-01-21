@@ -1,4 +1,5 @@
-import { BOOKS } from "./mappings.js";
+import topVerses from "../top1000_verses.json";
+import { resolveBookId } from "./mappings.js";
 
 type Env = {
   BIBLE_BUCKET: R2Bucket;
@@ -14,10 +15,22 @@ export async function scheduled(
 }
 
 async function runVotd(env: Env) {
-  const book = BOOKS[Math.floor(Math.random() * BOOKS.length)];
-  const chapter = Math.floor(Math.random() * book.chapters) + 1;
-  const key = `NKJV/${book.id}/${chapter}.json`;
+  const entries = topVerses as Array<{
+    reference: string;
+    rank?: number;
+    text?: string;
+    translation?: string;
+  }>;
+  if (!entries.length) return;
 
+  const entry = entries[Math.floor(Math.random() * entries.length)];
+  const reference = entry.reference?.trim();
+  if (!reference) return;
+
+  const parsed = parseReference(reference);
+  if (!parsed) return;
+
+  const key = `NKJV/${parsed.bookId}/${parsed.chapter}.json`;
   const obj = await env.BIBLE_BUCKET.get(key);
   if (!obj) return;
 
@@ -26,19 +39,34 @@ async function runVotd(env: Env) {
   };
 
   const verses = data?.data?.content ?? [];
-  if (!verses.length) return;
-
-  const verse = verses[Math.floor(Math.random() * verses.length)];
+  const verseId = `${parsed.bookId}.${parsed.chapter}.${parsed.verse}`;
+  const verse = verses.find((item) => item.id === verseId);
+  if (!verse) return;
 
   const payload = {
     data: {
       ...verse,
       bibleId: "NKJV",
-      bookId: book.id,
-      chapter: String(chapter)
+      bookId: parsed.bookId,
+      chapter: parsed.chapter
     },
     meta: {}
   };
 
   await env.BIBLE_KV.put("current_votd", JSON.stringify(payload));
+}
+
+function parseReference(reference: string) {
+  const match = reference.match(/^(.+?)\s+(\d+)(?::([\d-]+))?$/);
+  if (!match) return null;
+
+  const bookName = match[1].trim();
+  const bookId = resolveBookId(bookName);
+  if (!bookId) return null;
+
+  const chapter = match[2];
+  const versePart = match[3] ?? "1";
+  const verse = versePart.split("-")[0];
+
+  return { bookId, chapter, verse };
 }
