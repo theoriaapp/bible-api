@@ -27,6 +27,7 @@ Common codes:
 - `INVALID_PASSAGE_ID` - Bad passage format (expected `BOOK.CHAPTER.START-BOOK.CHAPTER.END`)
 - `INVALID_PASSAGE_RANGE` - Passage end must be after the start
 - `PASSAGE_NOT_FOUND` - Passage does not exist in storage
+- `INVALID_SEARCH_QUERY` - Search query cannot be parsed
 - `VOTD_NOT_SET` - Verse of the day not yet generated
 
 Passage examples:
@@ -34,6 +35,12 @@ Passage examples:
 - Shorthand end verse: `JHN.1.12-15`
 - Multi-chapter (same book): `JHN.1.12-2.5`
 - Multi-book: `JHN.21.25-ACT.1.3`
+
+Search endpoint:
+- `GET /v1/search?q=JHN6:12-15`
+- `GET /v1/search?q=JHN6-12`
+- `GET /v1/search?q=JHN.21.25-ACT.1.3`
+- `GET /v1/search?q=JHN6:12-15,GEN1:1-3`
 
 ## Environment variables
 - `R2_ENDPOINT` - `https://<accountid>.r2.cloudflarestorage.com`

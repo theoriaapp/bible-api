@@ -79,6 +79,142 @@ export const bookIdToChapters = new Map(
 );
 export const bookIds = BOOKS.map((book) => book.id);
 
+const bookAliasPairs: Array<[string, string]> = [
+  ["GEN", "GEN"],
+  ["GE", "GEN"],
+  ["GN", "GEN"],
+  ["EXO", "EXO"],
+  ["EX", "EXO"],
+  ["LEV", "LEV"],
+  ["LV", "LEV"],
+  ["NUM", "NUM"],
+  ["NU", "NUM"],
+  ["DEU", "DEU"],
+  ["DEUT", "DEU"],
+  ["DT", "DEU"],
+  ["JOS", "JOS"],
+  ["JOSH", "JOS"],
+  ["JDG", "JDG"],
+  ["JUDG", "JDG"],
+  ["RUT", "RUT"],
+  ["RUTH", "RUT"],
+  ["1SA", "1SA"],
+  ["1SAM", "1SA"],
+  ["2SA", "2SA"],
+  ["2SAM", "2SA"],
+  ["1KI", "1KI"],
+  ["1KGS", "1KI"],
+  ["2KI", "2KI"],
+  ["2KGS", "2KI"],
+  ["1CH", "1CH"],
+  ["1CHR", "1CH"],
+  ["2CH", "2CH"],
+  ["2CHR", "2CH"],
+  ["EZR", "EZR"],
+  ["NEH", "NEH"],
+  ["EST", "EST"],
+  ["JOB", "JOB"],
+  ["PSA", "PSA"],
+  ["PS", "PSA"],
+  ["PSM", "PSA"],
+  ["PRO", "PRO"],
+  ["PR", "PRO"],
+  ["ECC", "ECC"],
+  ["EC", "ECC"],
+  ["SNG", "SNG"],
+  ["SONG", "SNG"],
+  ["SOS", "SNG"],
+  ["ISA", "ISA"],
+  ["JER", "JER"],
+  ["LAM", "LAM"],
+  ["EZK", "EZK"],
+  ["EZE", "EZK"],
+  ["EZEK", "EZK"],
+  ["DAN", "DAN"],
+  ["HOS", "HOS"],
+  ["JOL", "JOL"],
+  ["JOEL", "JOL"],
+  ["AMO", "AMO"],
+  ["OBA", "OBA"],
+  ["JON", "JON"],
+  ["MIC", "MIC"],
+  ["NAM", "NAM"],
+  ["NAH", "NAM"],
+  ["HAB", "HAB"],
+  ["ZEP", "ZEP"],
+  ["ZEPH", "ZEP"],
+  ["HAG", "HAG"],
+  ["ZEC", "ZEC"],
+  ["ZECH", "ZEC"],
+  ["MAL", "MAL"],
+  ["MAT", "MAT"],
+  ["MT", "MAT"],
+  ["MRK", "MRK"],
+  ["MK", "MRK"],
+  ["LUK", "LUK"],
+  ["LK", "LUK"],
+  ["JHN", "JHN"],
+  ["JN", "JHN"],
+  ["JOH", "JHN"],
+  ["JOHN", "JHN"],
+  ["ACT", "ACT"],
+  ["AC", "ACT"],
+  ["ROM", "ROM"],
+  ["RO", "ROM"],
+  ["1CO", "1CO"],
+  ["1COR", "1CO"],
+  ["2CO", "2CO"],
+  ["2COR", "2CO"],
+  ["GAL", "GAL"],
+  ["EPH", "EPH"],
+  ["PHP", "PHP"],
+  ["PHIL", "PHP"],
+  ["COL", "COL"],
+  ["1TH", "1TH"],
+  ["1THES", "1TH"],
+  ["2TH", "2TH"],
+  ["2THES", "2TH"],
+  ["1TI", "1TI"],
+  ["1TIM", "1TI"],
+  ["2TI", "2TI"],
+  ["2TIM", "2TI"],
+  ["TIT", "TIT"],
+  ["PHM", "PHM"],
+  ["HEB", "HEB"],
+  ["JAS", "JAS"],
+  ["JAM", "JAS"],
+  ["1PE", "1PE"],
+  ["1PET", "1PE"],
+  ["2PE", "2PE"],
+  ["2PET", "2PE"],
+  ["1JN", "1JN"],
+  ["1JOHN", "1JN"],
+  ["2JN", "2JN"],
+  ["2JOHN", "2JN"],
+  ["3JN", "3JN"],
+  ["3JOHN", "3JN"],
+  ["JUD", "JUD"],
+  ["REV", "REV"]
+];
+
+const bookAliases = new Map(bookAliasPairs);
+
+export function resolveBookId(input: string): string | null {
+  const normalized = input.replace(/[^A-Z0-9]/gi, "").toUpperCase();
+  if (!normalized) return null;
+  if (bookAliases.has(normalized)) {
+    return bookAliases.get(normalized) ?? null;
+  }
+
+  const byId = BOOKS.find((book) => book.id === normalized);
+  if (byId) return byId.id;
+
+  const byPrefix = BOOKS.find((book) =>
+    book.name.replace(/[^A-Z0-9]/gi, "").toUpperCase().startsWith(normalized)
+  );
+  return byPrefix?.id ?? null;
+}
+
 export function getBookById(id: string): Book | undefined {
   return BOOKS.find((book) => book.id === id);
 }

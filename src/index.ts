@@ -4,7 +4,7 @@ import { describeRoute, openAPISpecs } from "hono-openapi";
 import { resolver, validator } from "hono-openapi/zod";
 import { z } from "zod";
 import { auth } from "./middleware/auth.js";
-import { BOOKS, bookIdToChapters } from "./mappings.js";
+import { BOOKS, bookIdToChapters, resolveBookId } from "./mappings.js";
 import { scheduled } from "./scheduled.js";
 
 type Env = {
@@ -66,14 +66,6 @@ const errorExamples = {
       }
     }
   },
-  passageCrossesChapters: {
-    value: {
-      error: {
-        code: "PASSAGE_CROSSES_CHAPTERS",
-        message: "Passage must be within one chapter."
-      }
-    }
-  },
   passageNotFound: {
     value: {
       error: { code: "PASSAGE_NOT_FOUND", message: "Passage not found." }
@@ -84,6 +76,15 @@ const errorExamples = {
   },
   notFound: {
     value: { error: { code: "NOT_FOUND", message: "Resource not found." } }
+  },
+  invalidSearchQuery: {
+    value: {
+      error: {
+        code: "INVALID_SEARCH_QUERY",
+        message:
+          "Invalid search query. Examples: JHN6:12-15, JHN6-12, JHN.21.25-ACT.1.3."
+      }
+    }
   }
 };
 
@@ -388,6 +389,96 @@ app.get(
 );
 
 app.get(
+  "/v1/search",
+  describeRoute({
+    summary: "Search passages",
+    description:
+      "Search passages with fuzzy input. Examples: JHN6:12-15, JHN6-12, JHN.21.25-ACT.1.3.",
+    responses: {
+      200: {
+        description: "OK",
+        content: {
+          "application/json": {
+            schema: resolver(passageResponse),
+            example: {
+              data: {
+                id: "JHN.6.1-JHN.6.12",
+                bibleId: "NKJV",
+                content: [
+                  { id: "JHN.6.1", text: "After these things..." },
+                  { id: "JHN.6.2", text: "Then a great multitude..." }
+                ]
+              },
+              meta: {}
+            }
+          }
+        }
+      },
+      400: {
+        description: "Bad request",
+        content: {
+          "application/json": {
+            schema: resolver(errorResponse),
+            examples: { invalidSearchQuery: errorExamples.invalidSearchQuery }
+          }
+        }
+      },
+      401: {
+        description: "Unauthorized",
+        content: {
+          "application/json": {
+            schema: resolver(errorResponse),
+            examples: { unauthorized: errorExamples.unauthorized }
+          }
+        }
+      },
+      404: {
+        description: "Not found",
+        content: {
+          "application/json": {
+            schema: resolver(errorResponse),
+            examples: { passageNotFound: errorExamples.passageNotFound }
+          }
+        }
+      }
+    }
+  }),
+  validator(
+    "query",
+    z.object({
+      q: z.string().optional(),
+      query: z.string().optional()
+    })
+  ),
+  async (c) => {
+    const { q, query } = c.req.valid("query");
+    const raw = (q ?? query ?? "").trim();
+    if (!raw) {
+      return c.json(errorExamples.invalidSearchQuery.value, 400);
+    }
+
+    const parsed = parseSearchQuery(raw);
+    if ("error" in parsed) {
+      return c.json({ error: parsed.error }, 400);
+    }
+
+    const result = await resolvePassages(c, parsed.passageIds);
+    if ("error" in result) {
+      return c.json({ error: result.error }, result.status);
+    }
+
+    return c.json({
+      data: {
+        id: parsed.normalized,
+        bibleId: "NKJV",
+        content: result.content
+      },
+      meta: { query: raw }
+    });
+  }
+);
+
+app.get(
   "/v1/bibles/:bibleId/passages/:passageId",
   describeRoute({
     summary: "Fetch a passage within a chapter",
@@ -429,8 +520,7 @@ app.get(
             schema: resolver(errorResponse),
             examples: {
               invalidPassageId: errorExamples.invalidPassageId,
-              invalidPassageRange: errorExamples.invalidPassageRange,
-              passageCrossesChapters: errorExamples.passageCrossesChapters
+              invalidPassageRange: errorExamples.invalidPassageRange
             }
           }
         }
@@ -459,66 +549,16 @@ app.get(
     );
   }
 
-  const parsed = parsePassageId(passageId);
-  if ("error" in parsed) {
-    return c.json({ error: parsed.error }, 400);
-  }
-
-  const { start, end } = parsed;
-  const content: Array<{ id: string; text: string }> = [];
-  const bookOrder = BOOKS.map((book) => book.id);
-  const startIdx = bookOrder.indexOf(start.bookId);
-  const endIdx = bookOrder.indexOf(end.bookId);
-
-  for (let b = startIdx; b <= endIdx; b += 1) {
-    const bookId = bookOrder[b];
-    const maxChapters = bookIdToChapters.get(bookId) ?? 0;
-    const firstChapter = bookId === start.bookId ? start.chapter : 1;
-    const lastChapter = bookId === end.bookId ? end.chapter : maxChapters;
-
-    for (let chapter = firstChapter; chapter <= lastChapter; chapter += 1) {
-      const key = `NKJV/${bookId}/${chapter}.json`;
-      const obj = await c.env.BIBLE_BUCKET.get(key);
-      if (!obj) {
-        return c.json(
-          { error: { code: "PASSAGE_NOT_FOUND", message: "Passage not found." } },
-          404
-        );
-      }
-
-      const chapterData = (await obj.json()) as {
-        data?: { content?: Array<{ id: string; text: string }> };
-      };
-
-      const verses = chapterData?.data?.content ?? [];
-      const filtered = verses.filter((verse) => {
-        const verseNum = Number(verse.id.split(".").pop());
-        if (Number.isNaN(verseNum)) return false;
-        if (bookId === start.bookId && chapter === start.chapter) {
-          return verseNum >= start.verse;
-        }
-        if (bookId === end.bookId && chapter === end.chapter) {
-          return verseNum <= end.verse;
-        }
-        return true;
-      });
-
-      content.push(...filtered);
-    }
-  }
-
-  if (!content.length) {
-    return c.json(
-      { error: { code: "PASSAGE_NOT_FOUND", message: "Passage not found." } },
-      404
-    );
+  const passageResult = await resolvePassages(c, [passageId]);
+  if ("error" in passageResult) {
+    return c.json({ error: passageResult.error }, passageResult.status);
   }
 
   return c.json({
     data: {
       id: passageId,
       bibleId: "NKJV",
-      content
+      content: passageResult.content
     },
     meta: {}
   });
@@ -622,6 +662,178 @@ function parsePassageId(
   }
 
   return { start, end };
+}
+
+function parseSearchQuery(
+  query: string
+):
+  | { passageIds: string[]; normalized: string }
+  | { error: { code: string; message: string } } {
+  const parts = query
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (!parts.length) {
+    return {
+      error: {
+        code: "INVALID_SEARCH_QUERY",
+        message:
+          "Invalid search query. Examples: JHN6:12-15, JHN6-12, JHN.21.25-ACT.1.3."
+      }
+    };
+  }
+
+  const passageIds: string[] = [];
+  for (const part of parts) {
+    const parsed = parseSearchSegment(part);
+    if (!parsed) {
+      return {
+        error: {
+          code: "INVALID_SEARCH_QUERY",
+          message:
+            "Invalid search query. Examples: JHN6:12-15, JHN6-12, JHN.21.25-ACT.1.3."
+        }
+      };
+    }
+    passageIds.push(parsed);
+  }
+
+  return { passageIds, normalized: passageIds.join(",") };
+}
+
+function parseSearchSegment(input: string): string | null {
+  const cleaned = input.replace(/\s+/g, "").toUpperCase();
+  const split = cleaned.split("-");
+  if (split.length > 2) return null;
+  const [startToken, endToken] = split;
+  const start = parseSearchRef(startToken);
+  if (!start) return null;
+
+  if (!endToken) {
+    const verse = start.verse ?? 1;
+    return `${start.bookId}.${start.chapter}.${verse}-${start.bookId}.${start.chapter}.${verse}`;
+  }
+
+  const end = parseSearchEndRef(endToken, start);
+  if (!end) return null;
+
+  const startVerse = start.verse ?? 1;
+  const endVerse = end.verse ?? 9999;
+  return `${start.bookId}.${start.chapter}.${startVerse}-${end.bookId}.${end.chapter}.${endVerse}`;
+}
+
+function parseSearchRef(
+  token: string
+): { bookId: string; chapter: number; verse?: number } | null {
+  const digitIndex = token.search(/\d/);
+  if (digitIndex === -1) return null;
+  const bookToken = token.slice(0, digitIndex);
+  const rest = token.slice(digitIndex);
+  const bookId = resolveBookId(bookToken);
+  if (!bookId) return null;
+  const normalized = rest.replace(":", ".");
+  const [chapterStr, verseStr] = normalized.split(".");
+  const chapter = Number(chapterStr);
+  if (Number.isNaN(chapter) || chapter < 1) return null;
+  if (chapter > (bookIdToChapters.get(bookId) ?? 0)) return null;
+  if (!verseStr) {
+    return { bookId, chapter };
+  }
+  const verse = Number(verseStr);
+  if (Number.isNaN(verse) || verse < 1) return null;
+  return { bookId, chapter, verse };
+}
+
+function parseSearchEndRef(
+  token: string,
+  start: { bookId: string; chapter: number; verse?: number }
+): { bookId: string; chapter: number; verse?: number } | null {
+  const hasLetters = /[A-Z]/.test(token);
+  if (hasLetters) {
+    return parseSearchRef(token);
+  }
+
+  const normalized = token.replace(":", ".");
+  if (normalized.includes(".")) {
+    const [chapterStr, verseStr] = normalized.split(".");
+    const chapter = Number(chapterStr);
+    if (Number.isNaN(chapter) || chapter < 1) return null;
+    const verse = verseStr ? Number(verseStr) : undefined;
+    if (verse !== undefined && (Number.isNaN(verse) || verse < 1)) return null;
+    return { bookId: start.bookId, chapter, verse };
+  }
+
+  const verse = Number(normalized);
+  if (Number.isNaN(verse) || verse < 1) return null;
+  return { bookId: start.bookId, chapter: start.chapter, verse };
+}
+
+async function resolvePassages(
+  c: Context<{ Bindings: Env }>,
+  passageIds: string[]
+): Promise<
+  | { content: Array<{ id: string; text: string }> }
+  | { error: { code: string; message: string }; status: 400 | 404 }
+> {
+  const content: Array<{ id: string; text: string }> = [];
+  for (const passageId of passageIds) {
+    const parsed = parsePassageId(passageId);
+    if ("error" in parsed) {
+      return { error: parsed.error, status: 400 };
+    }
+
+    const { start, end } = parsed;
+    const bookOrder = BOOKS.map((book) => book.id);
+    const startIdx = bookOrder.indexOf(start.bookId);
+    const endIdx = bookOrder.indexOf(end.bookId);
+
+    for (let b = startIdx; b <= endIdx; b += 1) {
+      const bookId = bookOrder[b];
+      const maxChapters = bookIdToChapters.get(bookId) ?? 0;
+      const firstChapter = bookId === start.bookId ? start.chapter : 1;
+      const lastChapter = bookId === end.bookId ? end.chapter : maxChapters;
+
+      for (let chapter = firstChapter; chapter <= lastChapter; chapter += 1) {
+        const key = `NKJV/${bookId}/${chapter}.json`;
+        const obj = await c.env.BIBLE_BUCKET.get(key);
+        if (!obj) {
+          return {
+            error: { code: "PASSAGE_NOT_FOUND", message: "Passage not found." },
+            status: 404
+          };
+        }
+
+        const chapterData = (await obj.json()) as {
+          data?: { content?: Array<{ id: string; text: string }> };
+        };
+
+        const verses = chapterData?.data?.content ?? [];
+        const filtered = verses.filter((verse) => {
+          const verseNum = Number(verse.id.split(".").pop());
+          if (Number.isNaN(verseNum)) return false;
+          if (bookId === start.bookId && chapter === start.chapter) {
+            return verseNum >= start.verse;
+          }
+          if (bookId === end.bookId && chapter === end.chapter) {
+            return verseNum <= end.verse;
+          }
+          return true;
+        });
+
+        content.push(...filtered);
+      }
+    }
+  }
+
+  if (!content.length) {
+    return {
+      error: { code: "PASSAGE_NOT_FOUND", message: "Passage not found." },
+      status: 404
+    };
+  }
+
+  return { content };
 }
 
 async function fetchR2Json(
