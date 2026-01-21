@@ -6,6 +6,7 @@ import type {
   ScheduledEvent
 } from "@cloudflare/workers-types";
 import { scheduled } from "../src/scheduled.js";
+import * as entry from "../src/index.js";
 
 type R2Object = {
   json: () => Promise<unknown>;
@@ -33,6 +34,10 @@ function createMockKv() {
 }
 
 describe("scheduled votd", () => {
+  test("entry exports scheduled handler", () => {
+    expect(typeof entry.scheduled).toBe("function");
+  });
+
   test("resolves top verse reference to NKJV verse", async () => {
     const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0);
     const { kv, store } = createMockKv();

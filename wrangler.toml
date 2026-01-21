@@ -13,9 +13,11 @@ binding = "BIBLE_KV"
 id = "48496f7b175446f5a77761563cce46be"
 preview_id = "7945621e446845dd997b8242ccfe9741"
 
-# 3. Scheduled Worker (Verse of the Day - Runs every day at 8am UTC)
+# 3. Scheduled Worker (Verse of the Day - 8:30am Sydney time)
 [triggers]
-crons = ["0 8 * * *"]
+# Cloudflare cron is UTC. Sydney is UTC+10 (AEST) or UTC+11 (AEDT).
+# This is set to 8:30am AEDT (UTC+11)
+crons = ["30 21 * * *"]
 
 # 4. Observability
 [observability]
