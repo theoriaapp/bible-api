@@ -31,6 +31,7 @@ API_KEY=your_key npm run test:prod
 
 Optional flags:
 - `BASE_URL=https://...`
+- `PROD_BASE_URL=https://...`
 
 ## Error codes
 All error responses use the shape:

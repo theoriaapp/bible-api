@@ -1,7 +1,11 @@
 import { describe, expect, test } from "vitest";
 
+const DEFAULT_BASE_URL = "https://bible-api.theoria-app.workers.dev";
+const RAW_BASE_URL = process.env.BASE_URL ?? process.env.PROD_BASE_URL;
 const BASE_URL =
-  process.env.BASE_URL ?? "https://bible-api.theoria-app.workers.dev";
+  RAW_BASE_URL && RAW_BASE_URL.startsWith("http")
+    ? RAW_BASE_URL
+    : DEFAULT_BASE_URL;
 const API_KEY = process.env.API_KEY;
 if (!API_KEY) {
   throw new Error("API_KEY is required for production tests.");
@@ -9,9 +13,13 @@ if (!API_KEY) {
 const apiKey: string = API_KEY;
 
 function buildUrl(path: string) {
-  const base = BASE_URL.endsWith("/") ? BASE_URL.slice(0, -1) : BASE_URL;
-  const suffix = path.startsWith("/") ? path : `/${path}`;
-  return `${base}${suffix}`;
+  try {
+    return new URL(path, BASE_URL).toString();
+  } catch {
+    const base = BASE_URL.endsWith("/") ? BASE_URL.slice(0, -1) : BASE_URL;
+    const suffix = path.startsWith("/") ? path : `/${path}`;
+    return `${base}${suffix}`;
+  }
 }
 
 async function get(path: string) {
