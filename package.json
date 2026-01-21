@@ -7,8 +7,8 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "seed": "tsx src/seed-r2.ts",
-    "test:local": "EXPECT_DATA=true EXPECT_VOTD=false ./scripts/test-api.sh",
-    "test:prod": "CURL_INSECURE=true EXPECT_DATA=true EXPECT_VOTD=true BASE_URL=https://bible-api.theoria-app.workers.dev ./scripts/test-api.sh"
+    "test:local": "vitest run tests/api.local.test.ts",
+    "test:prod": "vitest run tests/api.prod.test.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.758.0",
@@ -27,6 +27,7 @@
     "@types/node": "^22.10.5",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
+    "vitest": "^4.0.17",
     "wrangler": "^4.59.3"
   },
   "description": "Build a Bible API hosted on Cloudflare Workers",

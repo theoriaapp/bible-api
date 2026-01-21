@@ -748,6 +748,8 @@ function parseSearchRef(
     normalized = tokens.join("");
   }
 
+  normalized = normalized.replace(/^([A-Z0-9]+)\./, "$1");
+
   const match = normalized.match(/^([A-Z0-9]+?)(\d+)(?:[.:](\d+))?$/);
   if (!match) return null;
   const [, bookToken, chapterStr, verseStr] = match;
@@ -903,7 +905,7 @@ app.get("/openapi.json", (c) => {
         }
       },
       security: [{ ApiKeyAuth: [] }],
-      servers: [{ url: `${baseUrl}/v1`, description: "Current" }]
+      servers: [{ url: baseUrl, description: "Current" }]
     }
   });
   return handler(c as unknown as Parameters<typeof handler>[0]);
