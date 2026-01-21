@@ -8,8 +8,14 @@ if (!API_KEY) {
 }
 const apiKey: string = API_KEY;
 
+function buildUrl(path: string) {
+  const base = BASE_URL.endsWith("/") ? BASE_URL.slice(0, -1) : BASE_URL;
+  const suffix = path.startsWith("/") ? path : `/${path}`;
+  return `${base}${suffix}`;
+}
+
 async function get(path: string) {
-  const res = await fetch(`${BASE_URL}${path}`, {
+  const res = await fetch(buildUrl(path), {
     headers: new Headers({ "api-key": apiKey })
   });
   return res;
@@ -50,14 +56,14 @@ describe("API (prod)", () => {
   });
 
   test("GET /openapi.json", async () => {
-    const res = await fetch(`${BASE_URL}/openapi.json`);
+    const res = await fetch(buildUrl("/openapi.json"));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.paths["/v1/bibles"]).toBeDefined();
   });
 
   test("GET /docs", async () => {
-    const res = await fetch(`${BASE_URL}/docs`);
+    const res = await fetch(buildUrl("/docs"));
     expect(res.status).toBe(200);
     const text = await res.text();
     expect(text).toContain("swagger-ui");
