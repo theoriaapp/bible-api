@@ -1,6 +1,8 @@
 # bible-api
 Build a Bible API hosted on Cloudflare Workers
 
+![Tests](https://github.com/theoriaapp/bible-api/actions/workflows/tests.yml/badge.svg)
+
 ## Setup
 1. Install deps: `npm install`
 2. Copy env template: `cp env.example .env`
@@ -32,6 +34,12 @@ API_KEY=your_key npm run test:prod
 Optional flags:
 - `BASE_URL=https://...`
 - `PROD_BASE_URL=https://...`
+
+CI notes:
+- GitHub Actions runs `test:local` on every PR/push to `main`.
+- Prod tests run on `main` only and require repo secrets:
+  - `API_KEY` (your prod API key)
+  - `BASE_URL` (e.g. `https://bible-api.theoria-app.workers.dev`)
 
 ## Error codes
 All error responses use the shape:
