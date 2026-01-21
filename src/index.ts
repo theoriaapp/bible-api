@@ -5,7 +5,8 @@ import { resolver, validator } from "hono-openapi/zod";
 import { z } from "zod";
 import { auth } from "./middleware/auth.js";
 import { BOOKS, bookIdToChapters, resolveBookId } from "./mappings.js";
-export { scheduled } from "./scheduled.js";
+import { scheduled as scheduledHandler } from "./scheduled.js";
+export const scheduled = scheduledHandler;
 
 type Env = {
   BIBLE_BUCKET: R2Bucket;
