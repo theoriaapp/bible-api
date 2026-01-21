@@ -6,7 +6,6 @@ import { z } from "zod";
 import { auth } from "./middleware/auth.js";
 import { BOOKS, bookIdToChapters, resolveBookId } from "./mappings.js";
 import { scheduled as scheduledHandler } from "./scheduled.js";
-export const scheduled = scheduledHandler;
 
 type Env = {
   BIBLE_BUCKET: R2Bucket;
@@ -937,4 +936,7 @@ app.get("/docs", (c) => {
 </html>`);
 });
 
-export default app;
+export default {
+  fetch: app.fetch,
+  scheduled: scheduledHandler
+};

@@ -5,8 +5,7 @@ import type {
   R2Bucket,
   ScheduledEvent
 } from "@cloudflare/workers-types";
-import { scheduled } from "../src/scheduled.js";
-import * as entry from "../src/index.js";
+import entry from "../src/index.js";
 
 type R2Object = {
   json: () => Promise<unknown>;
@@ -53,7 +52,7 @@ describe("scheduled votd", () => {
     };
     const waitUntil = vi.fn((promise: Promise<void>) => promise);
 
-    await scheduled({} as ScheduledEvent, env as any, {
+    await entry.scheduled({} as ScheduledEvent, env as any, {
       waitUntil,
       passThroughOnException: vi.fn(),
       props: {}
