@@ -16,6 +16,25 @@ Swagger UI:
 - `http://localhost:8787/docs`
 Set `PUBLIC_BASE_URL` (optional) to force the OpenAPI `servers` URL in production.
 
+## Testing
+Run local tests (expects data and ignores VOTD unless set):
+
+```
+npm run test:local
+```
+
+Run against prod:
+
+```
+API_KEY=your_key npm run test:prod
+```
+
+Optional flags:
+- `EXPECT_DATA=true|false`
+- `EXPECT_VOTD=true|false`
+- `CURL_INSECURE=true|false`
+- `BASE_URL=https://...`
+
 ## Error codes
 All error responses use the shape:
 `{ "error": { "code": "SOME_CODE", "message": "...", "hint": "optional" } }`
