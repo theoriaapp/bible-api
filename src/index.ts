@@ -565,10 +565,7 @@ app.get("/openapi.json", (c) => {
         }
       },
       security: [{ ApiKeyAuth: [] }],
-      servers: [
-        { url: baseUrl, description: "Current" },
-        { url: `${baseUrl}/v1`, description: "Current (v1 base)" }
-      ]
+      servers: [{ url: `${baseUrl}/v1`, description: "Current" }]
     }
   });
   return handler(c as unknown as Parameters<typeof handler>[0]);
