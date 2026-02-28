@@ -58,6 +58,14 @@ describe("API (prod)", () => {
     expect(Array.isArray(body.data.content)).toBe(true);
   });
 
+  test("GET /v1/bibles/NKJV/verses/GEN.1.1", async () => {
+    const res = await get("/v1/bibles/NKJV/verses/GEN.1.1");
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data.id).toBe("GEN.1.1");
+    expect(typeof body.data.text).toBe("string");
+  });
+
   test("GET /v1/votd", async () => {
     const res = await get("/v1/votd");
     expect([200, 404]).toContain(res.status);

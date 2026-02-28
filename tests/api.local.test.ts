@@ -46,7 +46,8 @@ const mockData = {
       bibleId: "NKJV",
       content: [
         { id: "GEN.1.1", text: "In the beginning..." },
-        { id: "GEN.1.2", text: "The earth was without form..." }
+        { id: "GEN.1.2", text: "The earth was without form..." },
+        { id: "GEN.1.3", text: "Then God said..." }
       ]
     },
     meta: {}
@@ -154,6 +155,20 @@ describe("API (local)", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.data.content.length).toBe(2);
+    expect(body.data.content[0].id).toBe("GEN.1.1");
+    expect(body.data.content[1].id).toBe("GEN.1.2");
+  });
+
+  test("GET /v1/bibles/NKJV/verses/GEN.1.1", async () => {
+    const res = await app.request(
+      "/v1/bibles/NKJV/verses/GEN.1.1",
+      { headers: { "api-key": env.API_KEY } },
+      env
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data.id).toBe("GEN.1.1");
+    expect(body.data.text).toBe("In the beginning...");
   });
 
   test("GET /v1/search?q=John 6:12-15 NKJV", async () => {

@@ -983,6 +983,14 @@ async function resolvePassages(
         const filtered = verses.filter((verse) => {
           const verseNum = Number(verse.id.split(".").pop());
           if (Number.isNaN(verseNum)) return false;
+          if (
+            bookId === start.bookId &&
+            chapter === start.chapter &&
+            bookId === end.bookId &&
+            chapter === end.chapter
+          ) {
+            return verseNum >= start.verse && verseNum <= end.verse;
+          }
           if (bookId === start.bookId && chapter === start.chapter) {
             return verseNum >= start.verse;
           }
