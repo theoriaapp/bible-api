@@ -19,6 +19,7 @@ export const app = new Hono<{ Bindings: Env }>();
 const bibleIdParam = z.object({ bibleId: z.string() });
 const chapterParam = z.object({ bibleId: z.string(), chapterId: z.string() });
 const passageParam = z.object({ bibleId: z.string(), passageId: z.string() });
+const verseParam = z.object({ bibleId: z.string(), verseId: z.string() });
 
 const errorResponse = z.object({
   error: z.object({
@@ -58,6 +59,14 @@ const errorExamples = {
       }
     }
   },
+  invalidVerseId: {
+    value: {
+      error: {
+        code: "INVALID_VERSE_ID",
+        message: "Invalid verse id. Expected format BOOK.CHAPTER.VERSE (e.g., GEN.1.1)."
+      }
+    }
+  },
   invalidPassageRange: {
     value: {
       error: {
@@ -69,6 +78,11 @@ const errorExamples = {
   passageNotFound: {
     value: {
       error: { code: "PASSAGE_NOT_FOUND", message: "Passage not found." }
+    }
+  },
+  verseNotFound: {
+    value: {
+      error: { code: "VERSE_NOT_FOUND", message: "Verse not found." }
     }
   },
   votdNotSet: {
@@ -135,6 +149,17 @@ const passageResponse = z.object({
         text: z.string()
       })
     )
+  }),
+  meta: z.record(z.unknown()).optional()
+});
+
+const verseResponse = z.object({
+  data: z.object({
+    id: z.string(),
+    text: z.string(),
+    bibleId: z.string(),
+    bookId: z.string(),
+    chapter: z.string()
   }),
   meta: z.record(z.unknown()).optional()
 });
@@ -328,6 +353,106 @@ app.get(
 
   const key = `NKJV/${parsed.bookId}/${parsed.chapter}.json`;
   return fetchR2Json(c, key);
+  }
+);
+
+app.get(
+  "/v1/bibles/:bibleId/verses/:verseId",
+  describeRoute({
+    summary: "Fetch a single verse by id",
+    description:
+      "Fetch a single verse by id. Example: /v1/bibles/NKJV/verses/GEN.1.1",
+    responses: {
+      200: {
+        description: "OK",
+        content: {
+          "application/json": {
+            schema: resolver(verseResponse),
+            example: {
+              data: {
+                id: "GEN.1.1",
+                text: "In the beginning...",
+                bibleId: "NKJV",
+                bookId: "GEN",
+                chapter: "1"
+              },
+              meta: {}
+            }
+          }
+        }
+      },
+      401: {
+        description: "Unauthorized",
+        content: {
+          "application/json": {
+            schema: resolver(errorResponse),
+            examples: { unauthorized: errorExamples.unauthorized }
+          }
+        }
+      },
+      400: {
+        description: "Bad request",
+        content: {
+          "application/json": {
+            schema: resolver(errorResponse),
+            examples: { invalidVerseId: errorExamples.invalidVerseId }
+          }
+        }
+      },
+      404: {
+        description: "Not found",
+        content: {
+          "application/json": {
+            schema: resolver(errorResponse),
+            examples: {
+              bibleNotFound: errorExamples.bibleNotFound,
+              verseNotFound: errorExamples.verseNotFound
+            }
+          }
+        }
+      }
+    }
+  }),
+  validator("param", verseParam),
+  async (c) => {
+    const { bibleId, verseId } = c.req.valid("param");
+    if (bibleId !== "NKJV") {
+      return c.json(
+        { error: { code: "BIBLE_NOT_FOUND", message: "Bible not found." } },
+        404
+      );
+    }
+
+    const parsed = parseSingleVerseId(verseId);
+    if (!parsed) {
+      return c.json(errorExamples.invalidVerseId.value, 400);
+    }
+
+    const key = `NKJV/${parsed.bookId}/${parsed.chapter}.json`;
+    const obj = await c.env.BIBLE_BUCKET.get(key);
+    if (!obj) {
+      return c.json(errorExamples.verseNotFound.value, 404);
+    }
+
+    const chapterData = (await obj.json()) as {
+      data?: { content?: Array<{ id: string; text: string }> };
+    };
+    const verses = chapterData?.data?.content ?? [];
+    const verse = verses.find((item) => item.id === verseId);
+    if (!verse) {
+      return c.json(errorExamples.verseNotFound.value, 404);
+    }
+
+    return c.json({
+      data: {
+        id: verse.id,
+        text: verse.text,
+        bibleId: "NKJV",
+        bookId: parsed.bookId,
+        chapter: String(parsed.chapter)
+      },
+      meta: {}
+    });
   }
 );
 
@@ -576,6 +701,19 @@ function parseChapterId(chapterId: string) {
 
 const bookOrderIndex = new Map(BOOKS.map((book, index) => [book.id, index]));
 type VerseRef = { bookId: string; chapter: number; verse: number };
+
+function parseSingleVerseId(verseId: string): VerseRef | null {
+  const parts = verseId.split(".");
+  if (parts.length !== 3) return null;
+  const [bookId, chapterStr, verseStr] = parts;
+  const chapter = Number(chapterStr);
+  const verse = Number(verseStr);
+  if (!bookId || Number.isNaN(chapter) || Number.isNaN(verse)) return null;
+  const maxChapters = bookIdToChapters.get(bookId);
+  if (!maxChapters || chapter < 1 || chapter > maxChapters) return null;
+  if (verse < 1) return null;
+  return { bookId, chapter, verse };
+}
 
 function parseVerseRef(
   ref: string | undefined,
