@@ -3,6 +3,7 @@ import type { Context } from "hono";
 import { describeRoute, openAPISpecs } from "hono-openapi";
 import { resolver, validator } from "hono-openapi/zod";
 import { z } from "zod";
+import topVerses from "../top1000_verses.json";
 import { auth } from "./middleware/auth.js";
 import { BOOKS, bookIdToChapters, resolveBookId } from "./mappings.js";
 import { scheduled as scheduledHandler } from "./scheduled.js";
@@ -87,6 +88,15 @@ const errorExamples = {
   },
   votdNotSet: {
     value: { error: { code: "VOTD_NOT_SET", message: "Verse of the day not set." } }
+  },
+  invalidTimezone: {
+    value: {
+      error: {
+        code: "INVALID_TIMEZONE",
+        message:
+          "Invalid timezone. Use an IANA timezone, e.g., Australia/Sydney or America/New_York."
+      }
+    }
   },
   notFound: {
     value: { error: { code: "NOT_FOUND", message: "Resource not found." } }
@@ -460,7 +470,8 @@ app.get(
   "/v1/votd",
   describeRoute({
     summary: "Get the verse of the day",
-    description: "Get the verse of the day",
+    description:
+      "Get the verse of the day. Optionally send timezone to localize by user's day.",
     responses: {
       200: {
         description: "OK",
@@ -489,6 +500,15 @@ app.get(
           }
         }
       },
+      400: {
+        description: "Bad request",
+        content: {
+          "application/json": {
+            schema: resolver(errorResponse),
+            examples: { invalidTimezone: errorExamples.invalidTimezone }
+          }
+        }
+      },
       404: {
         description: "Not found",
         content: {
@@ -500,7 +520,26 @@ app.get(
       }
     }
   }),
+  validator(
+    "query",
+    z.object({
+      timezone: z.string().optional()
+    })
+  ),
   async (c) => {
+  const { timezone } = c.req.valid("query");
+  const requestedTimeZone = timezone?.trim();
+  if (requestedTimeZone) {
+    if (!isValidTimeZone(requestedTimeZone)) {
+      return c.json(errorExamples.invalidTimezone.value, 400);
+    }
+
+    const localized = await resolveLocalizedVotd(c, requestedTimeZone);
+    if (localized) {
+      return c.json(localized);
+    }
+  }
+
   const value = await c.env.BIBLE_KV.get("current_votd", "json");
   if (!value) {
     return c.json(
@@ -1029,6 +1068,117 @@ async function fetchR2Json(
   return c.body(obj.body, 200, {
     "content-type": obj.httpMetadata?.contentType ?? "application/json"
   });
+}
+
+function isValidTimeZone(timeZone: string) {
+  try {
+    Intl.DateTimeFormat("en-US", { timeZone }).format(new Date());
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getLocalDateInTimeZone(date: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(date);
+  const year = parts.find((part) => part.type === "year")?.value ?? "1970";
+  const month = parts.find((part) => part.type === "month")?.value ?? "01";
+  const day = parts.find((part) => part.type === "day")?.value ?? "01";
+  return `${year}-${month}-${day}`;
+}
+
+function hashString(value: string) {
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash +=
+      (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+  }
+  return Math.abs(hash >>> 0);
+}
+
+function parseTopVerseReference(reference: string) {
+  const match = reference.match(/^(.+?)\s+(\d+)(?::([\d-]+))?$/);
+  if (!match) return null;
+
+  const bookName = match[1].trim();
+  const bookId = resolveBookId(bookName);
+  if (!bookId) return null;
+
+  const chapter = Number(match[2]);
+  const versePart = match[3] ?? "1";
+  const verse = Number(versePart.split("-")[0]);
+  if (Number.isNaN(chapter) || Number.isNaN(verse)) return null;
+  return { bookId, chapter, verse };
+}
+
+async function resolveLocalizedVotd(
+  c: Context<{ Bindings: Env }>,
+  timeZone: string
+): Promise<
+  | {
+      data: {
+        id: string;
+        text: string;
+        bibleId: string;
+        bookId: string;
+        chapter: string;
+      };
+      meta: {
+        timezone: string;
+        localDate: string;
+        sourceReference: string;
+      };
+    }
+  | null
+> {
+  const entries = topVerses as Array<{ reference?: string }>;
+  if (!entries.length) return null;
+
+  const localDate = getLocalDateInTimeZone(new Date(), timeZone);
+  const startIndex = hashString(`NKJV:${localDate}`) % entries.length;
+
+  for (let offset = 0; offset < entries.length; offset += 1) {
+    const entry = entries[(startIndex + offset) % entries.length];
+    const reference = entry.reference?.trim();
+    if (!reference) continue;
+
+    const parsed = parseTopVerseReference(reference);
+    if (!parsed) continue;
+
+    const key = `NKJV/${parsed.bookId}/${parsed.chapter}.json`;
+    const obj = await c.env.BIBLE_BUCKET.get(key);
+    if (!obj) continue;
+
+    const chapterData = (await obj.json()) as {
+      data?: { content?: Array<{ id: string; text: string }> };
+    };
+
+    const verseId = `${parsed.bookId}.${parsed.chapter}.${parsed.verse}`;
+    const verse = chapterData?.data?.content?.find((item) => item.id === verseId);
+    if (!verse) continue;
+
+    return {
+      data: {
+        ...verse,
+        bibleId: "NKJV",
+        bookId: parsed.bookId,
+        chapter: String(parsed.chapter)
+      },
+      meta: {
+        timezone: timeZone,
+        localDate,
+        sourceReference: reference
+      }
+    };
+  }
+
+  return null;
 }
 
 app.get("/openapi.json", (c) => {

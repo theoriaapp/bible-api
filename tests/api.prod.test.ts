@@ -71,6 +71,21 @@ describe("API (prod)", () => {
     expect([200, 404]).toContain(res.status);
   });
 
+  test("GET /v1/votd?timezone=Australia/Sydney", async () => {
+    const res = await get("/v1/votd?timezone=Australia%2FSydney");
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data.id).toBeDefined();
+    expect(body.meta.timezone).toBe("Australia/Sydney");
+  });
+
+  test("GET /v1/votd?timezone=Not/AZone", async () => {
+    const res = await get("/v1/votd?timezone=Not%2FAZone");
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error.code).toBe("INVALID_TIMEZONE");
+  });
+
   test("GET /openapi.json", async () => {
     const res = await fetch(buildUrl("/openapi.json"));
     expect(res.status).toBe(200);

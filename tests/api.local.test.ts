@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { app } from "../src/index.js";
 
 type R2Object = {
@@ -213,6 +213,70 @@ describe("API (local)", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.data.id).toBe("GEN.1.1");
+  });
+
+  test("GET /v1/votd?timezone=Australia/Sydney", async () => {
+    const res = await app.request(
+      "/v1/votd?timezone=Australia%2FSydney",
+      { headers: { "api-key": env.API_KEY } },
+      env
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data.id).toBeDefined();
+    expect(body.meta.timezone).toBe("Australia/Sydney");
+  });
+
+  test("GET /v1/votd?timezone=Not/AZone", async () => {
+    const res = await app.request(
+      "/v1/votd?timezone=Not%2FAZone",
+      { headers: { "api-key": env.API_KEY } },
+      env
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error.code).toBe("INVALID_TIMEZONE");
+  });
+
+  test("timezone-localized VOTD shifts by local date", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-03-01T01:00:00.000Z"));
+
+      const sydneyRes = await app.request(
+        "/v1/votd?timezone=Australia%2FSydney",
+        { headers: { "api-key": env.API_KEY } },
+        env
+      );
+      const nyRes = await app.request(
+        "/v1/votd?timezone=America%2FNew_York",
+        { headers: { "api-key": env.API_KEY } },
+        env
+      );
+
+      expect(sydneyRes.status).toBe(200);
+      expect(nyRes.status).toBe(200);
+
+      const sydneyBody = await sydneyRes.json();
+      const nyBody = await nyRes.json();
+
+      expect(sydneyBody.meta.localDate).toBe("2026-03-01");
+      expect(nyBody.meta.localDate).toBe("2026-02-28");
+
+      vi.setSystemTime(new Date("2026-03-02T01:00:00.000Z"));
+      const nyNextDayRes = await app.request(
+        "/v1/votd?timezone=America%2FNew_York",
+        { headers: { "api-key": env.API_KEY } },
+        env
+      );
+      expect(nyNextDayRes.status).toBe(200);
+      const nyNextDayBody = await nyNextDayRes.json();
+
+      expect(nyNextDayBody.meta.localDate).toBe("2026-03-01");
+      expect(nyNextDayBody.data.id).toBe(sydneyBody.data.id);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test("GET /openapi.json", async () => {
