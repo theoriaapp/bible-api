@@ -5,7 +5,15 @@ import { resolver, validator } from "hono-openapi/zod";
 import { z } from "zod";
 import topVerses from "../top1000_verses.json";
 import { auth } from "./middleware/auth.js";
-import { BOOKS, bookIdToChapters, resolveBookId } from "./mappings.js";
+import {
+  BIBLES,
+  bookOrderIndexFor,
+  chaptersForBook,
+  getBible,
+  resolveBookId,
+  resolveBookIdFor,
+  type Bible
+} from "./mappings.js";
 import { scheduled as scheduledHandler } from "./scheduled.js";
 
 type Env = {
@@ -21,6 +29,19 @@ const bibleIdParam = z.object({ bibleId: z.string() });
 const chapterParam = z.object({ bibleId: z.string(), chapterId: z.string() });
 const passageParam = z.object({ bibleId: z.string(), passageId: z.string() });
 const verseParam = z.object({ bibleId: z.string(), verseId: z.string() });
+const bookParam = z.object({ bibleId: z.string(), bookId: z.string() });
+const includeNotesQuery = z.object({
+  "include-notes": z.enum(["true", "false"]).optional()
+});
+
+const supportedBibleIds = BIBLES.map((bible) => bible.id);
+const bibleNotFoundError = {
+  error: {
+    code: "BIBLE_NOT_FOUND",
+    message: "Bible not found.",
+    hint: `Supported bibles: ${supportedBibleIds.join(", ")}.`
+  }
+} as const;
 
 const errorResponse = z.object({
   error: z.object({
@@ -41,7 +62,24 @@ const errorExamples = {
     }
   },
   bibleNotFound: {
-    value: { error: { code: "BIBLE_NOT_FOUND", message: "Bible not found." } }
+    value: bibleNotFoundError
+  },
+  invalidBookId: {
+    value: {
+      error: {
+        code: "INVALID_BOOK_ID",
+        message: "Invalid book id. Expected a book code such as GEN."
+      }
+    }
+  },
+  notesNotAvailable: {
+    value: {
+      error: {
+        code: "NOTES_NOT_AVAILABLE",
+        message: "This bible does not include study notes.",
+        hint: "Study notes are available for: OSB."
+      }
+    }
   },
   invalidChapterId: {
     value: {
@@ -117,7 +155,9 @@ const bibleListResponse = z.object({
     z.object({
       id: z.string(),
       name: z.string(),
-      abbreviation: z.string()
+      abbreviation: z.string(),
+      description: z.string(),
+      features: z.array(z.string())
     })
   ),
   meta: z.record(z.unknown()).optional()
@@ -129,10 +169,19 @@ const booksResponse = z.object({
       id: z.string(),
       name: z.string(),
       abbreviation: z.string(),
-      chapters: z.number()
+      chapters: z.number(),
+      testament: z.enum(["OT", "NT", "DC"]).optional()
     })
   ),
   meta: z.record(z.unknown()).optional()
+});
+
+const noteSchema = z.object({
+  id: z.string(),
+  type: z.enum(["inline", "footnote", "intro", "sidebar", "unclear"]),
+  verseId: z.string().nullable(),
+  text: z.string(),
+  sequence: z.number()
 });
 
 const chapterResponse = z.object({
@@ -144,7 +193,26 @@ const chapterResponse = z.object({
         id: z.string(),
         text: z.string()
       })
-    )
+    ),
+    notes: z.array(noteSchema).optional()
+  }),
+  meta: z.record(z.unknown()).optional()
+});
+
+const chapterNotesResponse = z.object({
+  data: z.object({
+    id: z.string(),
+    bibleId: z.string(),
+    notes: z.array(noteSchema)
+  }),
+  meta: z.record(z.unknown()).optional()
+});
+
+const bookIntroResponse = z.object({
+  data: z.object({
+    bookId: z.string(),
+    bibleId: z.string(),
+    notes: z.array(noteSchema)
   }),
   meta: z.record(z.unknown()).optional()
 });
@@ -169,7 +237,8 @@ const verseResponse = z.object({
     text: z.string(),
     bibleId: z.string(),
     bookId: z.string(),
-    chapter: z.string()
+    chapter: z.string(),
+    notes: z.array(noteSchema).optional()
   }),
   meta: z.record(z.unknown()).optional()
 });
@@ -200,7 +269,20 @@ app.get(
             schema: resolver(bibleListResponse),
             example: {
               data: [
-                { id: "NKJV", name: "New King James Version", abbreviation: "NKJV" }
+                {
+                  id: "NKJV",
+                  name: "New King James Version",
+                  abbreviation: "NKJV",
+                  description: "New King James Version.",
+                  features: []
+                },
+                {
+                  id: "OSB",
+                  name: "Orthodox Study Bible",
+                  abbreviation: "OSB",
+                  description: "Orthodox Study Bible with study notes.",
+                  features: ["notes"]
+                }
               ],
               meta: {}
             }
@@ -220,13 +302,13 @@ app.get(
   }),
   (c) => {
   return c.json({
-    data: [
-      {
-        id: "NKJV",
-        name: "New King James Version",
-        abbreviation: "NKJV"
-      }
-    ],
+    data: BIBLES.map((bible) => ({
+      id: bible.id,
+      name: bible.name,
+      abbreviation: bible.abbreviation,
+      description: bible.description,
+      features: bible.features
+    })),
     meta: {}
   });
   }
@@ -275,14 +357,12 @@ app.get(
   validator("param", bibleIdParam),
   async (c) => {
   const { bibleId } = c.req.valid("param");
-  if (bibleId !== "NKJV") {
-    return c.json(
-      { error: { code: "BIBLE_NOT_FOUND", message: "Bible not found." } },
-      404
-    );
+  const bible = getBible(bibleId);
+  if (!bible) {
+    return c.json(bibleNotFoundError, 404);
   }
 
-  return fetchR2Json(c, "NKJV/books.json");
+  return fetchR2Json(c, `${bible.id}/books.json`);
   }
 );
 
@@ -291,7 +371,7 @@ app.get(
   describeRoute({
     summary: "Fetch a chapter by id",
     description:
-      "Fetch a chapter by id. Example: /v1/bibles/NKJV/chapters/GEN.1",
+      "Fetch a chapter by id. Example: /v1/bibles/NKJV/chapters/GEN.1. Pass include-notes=true to embed study notes (bibles with the notes feature only).",
     responses: {
       200: {
         description: "OK",
@@ -339,16 +419,16 @@ app.get(
     }
   }),
   validator("param", chapterParam),
+  validator("query", includeNotesQuery),
   async (c) => {
   const { bibleId, chapterId } = c.req.valid("param");
-  if (bibleId !== "NKJV") {
-    return c.json(
-      { error: { code: "BIBLE_NOT_FOUND", message: "Bible not found." } },
-      404
-    );
+  const includeNotes = c.req.valid("query")["include-notes"] === "true";
+  const bible = getBible(bibleId);
+  if (!bible) {
+    return c.json(bibleNotFoundError, 404);
   }
 
-  const parsed = parseChapterId(chapterId);
+  const parsed = parseChapterId(bible, chapterId);
   if (!parsed) {
     return c.json(
       {
@@ -361,8 +441,29 @@ app.get(
     );
   }
 
-  const key = `NKJV/${parsed.bookId}/${parsed.chapter}.json`;
-  return fetchR2Json(c, key);
+  const key = `${bible.id}/${parsed.bookId}/${parsed.chapter}.json`;
+  if (!includeNotes) {
+    return fetchR2Json(c, key);
+  }
+
+  const obj = await c.env.BIBLE_BUCKET.get(key);
+  if (!obj) {
+    return c.json(
+      { error: { code: "NOT_FOUND", message: "Resource not found." } },
+      404
+    );
+  }
+
+  const chapterData = (await obj.json()) as {
+    data?: Record<string, unknown>;
+    meta?: Record<string, unknown>;
+  };
+  const notes = await loadChapterNotes(c, bible, parsed.bookId, parsed.chapter);
+
+  return c.json({
+    data: { ...(chapterData?.data ?? {}), notes },
+    meta: chapterData?.meta ?? {}
+  });
   }
 );
 
@@ -371,7 +472,7 @@ app.get(
   describeRoute({
     summary: "Fetch a single verse by id",
     description:
-      "Fetch a single verse by id. Example: /v1/bibles/NKJV/verses/GEN.1.1",
+      "Fetch a single verse by id. Example: /v1/bibles/NKJV/verses/GEN.1.1. Pass include-notes=true to embed study notes anchored to this verse (bibles with the notes feature only).",
     responses: {
       200: {
         description: "OK",
@@ -424,21 +525,22 @@ app.get(
     }
   }),
   validator("param", verseParam),
+  validator("query", includeNotesQuery),
   async (c) => {
     const { bibleId, verseId } = c.req.valid("param");
-    if (bibleId !== "NKJV") {
-      return c.json(
-        { error: { code: "BIBLE_NOT_FOUND", message: "Bible not found." } },
-        404
-      );
+    const includeNotes = c.req.valid("query")["include-notes"] === "true";
+    const bible = getBible(bibleId);
+    if (!bible) {
+      return c.json(bibleNotFoundError, 404);
     }
 
-    const parsed = parseSingleVerseId(verseId);
+    const parsed = parseSingleVerseId(bible, verseId);
     if (!parsed) {
       return c.json(errorExamples.invalidVerseId.value, 400);
     }
 
-    const key = `NKJV/${parsed.bookId}/${parsed.chapter}.json`;
+    const normalizedVerseId = `${parsed.bookId}.${parsed.chapter}.${parsed.verse}`;
+    const key = `${bible.id}/${parsed.bookId}/${parsed.chapter}.json`;
     const obj = await c.env.BIBLE_BUCKET.get(key);
     if (!obj) {
       return c.json(errorExamples.verseNotFound.value, 404);
@@ -448,18 +550,216 @@ app.get(
       data?: { content?: Array<{ id: string; text: string }> };
     };
     const verses = chapterData?.data?.content ?? [];
-    const verse = verses.find((item) => item.id === verseId);
+    const verse = verses.find((item) => item.id === normalizedVerseId);
     if (!verse) {
       return c.json(errorExamples.verseNotFound.value, 404);
     }
 
+    const data: Record<string, unknown> = {
+      id: verse.id,
+      text: verse.text,
+      bibleId: bible.id,
+      bookId: parsed.bookId,
+      chapter: String(parsed.chapter)
+    };
+
+    if (includeNotes) {
+      const notes = await loadChapterNotes(c, bible, parsed.bookId, String(parsed.chapter));
+      data.notes = notes.filter((note) => note.verseId === normalizedVerseId);
+    }
+
+    return c.json({ data, meta: {} });
+  }
+);
+
+app.get(
+  "/v1/bibles/:bibleId/chapters/:chapterId/notes",
+  describeRoute({
+    summary: "Fetch study notes for a chapter",
+    description:
+      "Fetch study notes anchored within a chapter, in document order. Example: /v1/bibles/OSB/chapters/GEN.1/notes. Only available for bibles with the notes feature.",
+    responses: {
+      200: {
+        description: "OK",
+        content: {
+          "application/json": {
+            schema: resolver(chapterNotesResponse),
+            example: {
+              data: {
+                id: "GEN.1",
+                bibleId: "OSB",
+                notes: [
+                  {
+                    id: "n11",
+                    type: "sidebar",
+                    verseId: "GEN.1.28",
+                    text: "THE HOLY TRINITY",
+                    sequence: 1
+                  }
+                ]
+              },
+              meta: {}
+            }
+          }
+        }
+      },
+      401: {
+        description: "Unauthorized",
+        content: {
+          "application/json": {
+            schema: resolver(errorResponse),
+            examples: { unauthorized: errorExamples.unauthorized }
+          }
+        }
+      },
+      400: {
+        description: "Bad request",
+        content: {
+          "application/json": {
+            schema: resolver(errorResponse),
+            examples: { invalidChapterId: errorExamples.invalidChapterId }
+          }
+        }
+      },
+      404: {
+        description: "Not found",
+        content: {
+          "application/json": {
+            schema: resolver(errorResponse),
+            examples: {
+              bibleNotFound: errorExamples.bibleNotFound,
+              notesNotAvailable: errorExamples.notesNotAvailable
+            }
+          }
+        }
+      }
+    }
+  }),
+  validator("param", chapterParam),
+  async (c) => {
+    const { bibleId, chapterId } = c.req.valid("param");
+    const bible = getBible(bibleId);
+    if (!bible) {
+      return c.json(bibleNotFoundError, 404);
+    }
+    if (!bible.features.includes("notes")) {
+      return c.json(errorExamples.notesNotAvailable.value, 404);
+    }
+
+    const parsed = parseChapterId(bible, chapterId);
+    if (!parsed) {
+      return c.json(
+        {
+          error: {
+            code: "INVALID_CHAPTER_ID",
+            message: "Invalid chapter id. Expected format BOOK.CHAPTER (e.g., GEN.1)."
+          }
+        },
+        400
+      );
+    }
+
+    const notes = await loadChapterNotes(c, bible, parsed.bookId, parsed.chapter);
     return c.json({
       data: {
-        id: verse.id,
-        text: verse.text,
-        bibleId: "NKJV",
-        bookId: parsed.bookId,
-        chapter: String(parsed.chapter)
+        id: `${parsed.bookId}.${parsed.chapter}`,
+        bibleId: bible.id,
+        notes
+      },
+      meta: {}
+    });
+  }
+);
+
+app.get(
+  "/v1/bibles/:bibleId/books/:bookId/intro",
+  describeRoute({
+    summary: "Fetch a book introduction",
+    description:
+      "Fetch the introduction notes for a book (author, date, major themes, background). Example: /v1/bibles/OSB/books/GEN/intro. Only available for bibles with the notes feature.",
+    responses: {
+      200: {
+        description: "OK",
+        content: {
+          "application/json": {
+            schema: resolver(bookIntroResponse),
+            example: {
+              data: {
+                bookId: "GEN",
+                bibleId: "OSB",
+                notes: [
+                  {
+                    id: "n1",
+                    type: "intro",
+                    verseId: null,
+                    text: "Author — Traditionally, both Jews and Christians believe Moses is the author...",
+                    sequence: 1
+                  }
+                ]
+              },
+              meta: {}
+            }
+          }
+        }
+      },
+      401: {
+        description: "Unauthorized",
+        content: {
+          "application/json": {
+            schema: resolver(errorResponse),
+            examples: { unauthorized: errorExamples.unauthorized }
+          }
+        }
+      },
+      400: {
+        description: "Bad request",
+        content: {
+          "application/json": {
+            schema: resolver(errorResponse),
+            examples: { invalidBookId: errorExamples.invalidBookId }
+          }
+        }
+      },
+      404: {
+        description: "Not found",
+        content: {
+          "application/json": {
+            schema: resolver(errorResponse),
+            examples: {
+              bibleNotFound: errorExamples.bibleNotFound,
+              notesNotAvailable: errorExamples.notesNotAvailable
+            }
+          }
+        }
+      }
+    }
+  }),
+  validator("param", bookParam),
+  async (c) => {
+    const { bibleId, bookId } = c.req.valid("param");
+    const bible = getBible(bibleId);
+    if (!bible) {
+      return c.json(bibleNotFoundError, 404);
+    }
+    if (!bible.features.includes("notes")) {
+      return c.json(errorExamples.notesNotAvailable.value, 404);
+    }
+
+    const resolvedBookId = resolveBookIdFor(bible, bookId);
+    if (!resolvedBookId) {
+      return c.json(errorExamples.invalidBookId.value, 400);
+    }
+
+    const obj = await c.env.BIBLE_BUCKET.get(
+      `${bible.id}/notes/${resolvedBookId}/intro.json`
+    );
+    const notes = obj ? await parseNotesObject(obj) : [];
+
+    return c.json({
+      data: {
+        bookId: resolvedBookId,
+        bibleId: bible.id,
+        notes
       },
       meta: {}
     });
@@ -611,22 +911,28 @@ app.get(
     "query",
     z.object({
       q: z.string().optional(),
-      query: z.string().optional()
+      query: z.string().optional(),
+      bibleId: z.string().optional()
     })
   ),
   async (c) => {
-    const { q, query } = c.req.valid("query");
+    const { q, query, bibleId } = c.req.valid("query");
+    const bible = getBible(bibleId ?? "NKJV");
+    if (!bible) {
+      return c.json(bibleNotFoundError, 404);
+    }
+
     const raw = (q ?? query ?? "").trim();
     if (!raw) {
       return c.json(errorExamples.invalidSearchQuery.value, 400);
     }
 
-    const parsed = parseSearchQuery(raw);
+    const parsed = parseSearchQuery(bible, raw);
     if ("error" in parsed) {
       return c.json({ error: parsed.error }, 400);
     }
 
-    const result = await resolvePassages(c, parsed.passageIds);
+    const result = await resolvePassages(c, bible, parsed.passageIds);
     if ("error" in result) {
       return c.json({ error: result.error }, result.status);
     }
@@ -634,7 +940,7 @@ app.get(
     return c.json({
       data: {
         id: parsed.normalized,
-        bibleId: "NKJV",
+        bibleId: bible.id,
         content: result.content
       },
       meta: { query: raw }
@@ -706,14 +1012,12 @@ app.get(
   validator("param", passageParam),
   async (c) => {
   const { bibleId, passageId } = c.req.valid("param");
-  if (bibleId !== "NKJV") {
-    return c.json(
-      { error: { code: "BIBLE_NOT_FOUND", message: "Bible not found." } },
-      404
-    );
+  const bible = getBible(bibleId);
+  if (!bible) {
+    return c.json(bibleNotFoundError, 404);
   }
 
-  const passageResult = await resolvePassages(c, [passageId]);
+  const passageResult = await resolvePassages(c, bible, [passageId]);
   if ("error" in passageResult) {
     return c.json({ error: passageResult.error }, passageResult.status);
   }
@@ -721,7 +1025,7 @@ app.get(
   return c.json({
     data: {
       id: passageId,
-      bibleId: "NKJV",
+      bibleId: bible.id,
       content: passageResult.content
     },
     meta: {}
@@ -729,32 +1033,32 @@ app.get(
   }
 );
 
-function parseChapterId(chapterId: string) {
+function parseChapterId(bible: Bible, chapterId: string) {
   const [bookId, chapterStr] = chapterId.split(".");
   const chapter = Number(chapterStr);
   if (!bookId || Number.isNaN(chapter)) return null;
-  const maxChapters = bookIdToChapters.get(bookId);
+  const maxChapters = chaptersForBook(bible, bookId);
   if (!maxChapters || chapter < 1 || chapter > maxChapters) return null;
   return { bookId, chapter: String(chapter) };
 }
 
-const bookOrderIndex = new Map(BOOKS.map((book, index) => [book.id, index]));
 type VerseRef = { bookId: string; chapter: number; verse: number };
 
-function parseSingleVerseId(verseId: string): VerseRef | null {
+function parseSingleVerseId(bible: Bible, verseId: string): VerseRef | null {
   const parts = verseId.split(".");
   if (parts.length !== 3) return null;
   const [bookId, chapterStr, verseStr] = parts;
   const chapter = Number(chapterStr);
   const verse = Number(verseStr);
   if (!bookId || Number.isNaN(chapter) || Number.isNaN(verse)) return null;
-  const maxChapters = bookIdToChapters.get(bookId);
+  const maxChapters = chaptersForBook(bible, bookId);
   if (!maxChapters || chapter < 1 || chapter > maxChapters) return null;
   if (verse < 1) return null;
   return { bookId, chapter, verse };
 }
 
 function parseVerseRef(
+  bible: Bible,
   ref: string | undefined,
   defaults?: { bookId: string; chapter: number }
 ): VerseRef | null {
@@ -778,17 +1082,18 @@ function parseVerseRef(
   const chapter = Number(chapterStr ?? defaults?.chapter);
   const verse = Number(verseStr);
   if (Number.isNaN(chapter) || Number.isNaN(verse)) return null;
-  const maxChapters = bookIdToChapters.get(bookId);
+  const maxChapters = chaptersForBook(bible, bookId);
   if (!maxChapters || chapter < 1 || chapter > maxChapters) return null;
   if (verse < 1) return null;
   return { bookId, chapter, verse };
 }
 
 function parsePassageId(
+  bible: Bible,
   passageId: string
 ): { start: VerseRef; end: VerseRef } | { error: { code: string; message: string } } {
   const [startRef, endRef] = passageId.split("-");
-  const start = parseVerseRef(startRef);
+  const start = parseVerseRef(bible, startRef);
   if (!start) {
     return {
       error: {
@@ -800,7 +1105,7 @@ function parsePassageId(
   }
 
   const end = endRef
-    ? parseVerseRef(endRef, { bookId: start.bookId, chapter: start.chapter })
+    ? parseVerseRef(bible, endRef, { bookId: start.bookId, chapter: start.chapter })
     : start;
   if (!end) {
     return {
@@ -812,8 +1117,8 @@ function parsePassageId(
     };
   }
 
-  const startIdx = bookOrderIndex.get(start.bookId);
-  const endIdx = bookOrderIndex.get(end.bookId);
+  const startIdx = bookOrderIndexFor(bible, start.bookId);
+  const endIdx = bookOrderIndexFor(bible, end.bookId);
   if (startIdx === undefined || endIdx === undefined) {
     return {
       error: {
@@ -842,6 +1147,7 @@ function parsePassageId(
 }
 
 function parseSearchQuery(
+  bible: Bible,
   query: string
 ):
   | { passageIds: string[]; normalized: string }
@@ -864,7 +1170,7 @@ function parseSearchQuery(
 
   const passageIds: string[] = [];
   for (const part of parts) {
-    const parsed = parseSearchSegment(part);
+    const parsed = parseSearchSegment(bible, part);
     if (!parsed) {
       return {
         error: {
@@ -880,12 +1186,12 @@ function parseSearchQuery(
   return { passageIds, normalized: passageIds.join(",") };
 }
 
-function parseSearchSegment(input: string): string | null {
+function parseSearchSegment(bible: Bible, input: string): string | null {
   const cleaned = input.replace(/\s+/g, "").toUpperCase();
   const split = cleaned.split("-");
   if (split.length > 2) return null;
   const [startToken, endToken] = split;
-  const start = parseSearchRef(startToken);
+  const start = parseSearchRef(bible, startToken);
   if (!start) return null;
 
   if (!endToken) {
@@ -893,7 +1199,7 @@ function parseSearchSegment(input: string): string | null {
     return `${start.bookId}.${start.chapter}.${verse}-${start.bookId}.${start.chapter}.${verse}`;
   }
 
-  const end = parseSearchEndRef(endToken, start);
+  const end = parseSearchEndRef(bible, endToken, start);
   if (!end) return null;
 
   const startVerse = start.verse ?? 1;
@@ -902,6 +1208,7 @@ function parseSearchSegment(input: string): string | null {
 }
 
 function parseSearchRef(
+  bible: Bible,
   token: string
 ): { bookId: string; chapter: number; verse?: number } | null {
   const tokens = token
@@ -930,11 +1237,11 @@ function parseSearchRef(
   const match = normalized.match(/^([A-Z0-9]+?)(\d+)(?:[.:](\d+))?$/);
   if (!match) return null;
   const [, bookToken, chapterStr, verseStr] = match;
-  const bookId = resolveBookId(bookToken);
+  const bookId = resolveBookIdFor(bible, bookToken);
   if (!bookId) return null;
   const chapter = Number(chapterStr);
   if (Number.isNaN(chapter) || chapter < 1) return null;
-  if (chapter > (bookIdToChapters.get(bookId) ?? 0)) return null;
+  if (chapter > (chaptersForBook(bible, bookId) ?? 0)) return null;
   if (!verseStr) {
     return { bookId, chapter };
   }
@@ -944,12 +1251,13 @@ function parseSearchRef(
 }
 
 function parseSearchEndRef(
+  bible: Bible,
   token: string,
   start: { bookId: string; chapter: number; verse?: number }
 ): { bookId: string; chapter: number; verse?: number } | null {
   const hasLetters = /[A-Z]/.test(token);
   if (hasLetters) {
-    return parseSearchRef(token);
+    return parseSearchRef(bible, token);
   }
 
   const normalized = token.replace(":", ".");
@@ -972,7 +1280,7 @@ function normalizeSearchQuery(query: string) {
   cleaned = cleaned.replace(/\(([^)]+)\)$/g, " ");
   cleaned = cleaned.replace(/\bVERSION\s*=\s*[A-Z0-9]+\b/gi, " ");
   cleaned = cleaned.replace(
-    /\b(NKJV|KJV|NIV|ESV|NLT|NASB|CSB|RSV|NRSV|NRSVUE|NLV|GNT|CEV)\b/gi,
+    /\b(NKJV|OSB|KJV|NIV|ESV|NLT|NASB|CSB|RSV|NRSV|NRSVUE|NLV|GNT|CEV)\b/gi,
     " "
   );
   cleaned = cleaned.replace(/\s+/g, " ").trim();
@@ -981,6 +1289,7 @@ function normalizeSearchQuery(query: string) {
 
 async function resolvePassages(
   c: Context<{ Bindings: Env }>,
+  bible: Bible,
   passageIds: string[]
 ): Promise<
   | { content: Array<{ id: string; text: string }> }
@@ -988,24 +1297,24 @@ async function resolvePassages(
 > {
   const content: Array<{ id: string; text: string }> = [];
   for (const passageId of passageIds) {
-    const parsed = parsePassageId(passageId);
+    const parsed = parsePassageId(bible, passageId);
     if ("error" in parsed) {
       return { error: parsed.error, status: 400 };
     }
 
     const { start, end } = parsed;
-    const bookOrder = BOOKS.map((book) => book.id);
+    const bookOrder = bible.books.map((book) => book.id);
     const startIdx = bookOrder.indexOf(start.bookId);
     const endIdx = bookOrder.indexOf(end.bookId);
 
     for (let b = startIdx; b <= endIdx; b += 1) {
       const bookId = bookOrder[b];
-      const maxChapters = bookIdToChapters.get(bookId) ?? 0;
+      const maxChapters = chaptersForBook(bible, bookId) ?? 0;
       const firstChapter = bookId === start.bookId ? start.chapter : 1;
       const lastChapter = bookId === end.bookId ? end.chapter : maxChapters;
 
       for (let chapter = firstChapter; chapter <= lastChapter; chapter += 1) {
-        const key = `NKJV/${bookId}/${chapter}.json`;
+        const key = `${bible.id}/${bookId}/${chapter}.json`;
         const obj = await c.env.BIBLE_BUCKET.get(key);
         if (!obj) {
           return {
@@ -1052,6 +1361,35 @@ async function resolvePassages(
   }
 
   return { content };
+}
+
+type StudyNote = {
+  id: string;
+  type: string;
+  verseId: string | null;
+  text: string;
+  sequence: number;
+};
+
+async function parseNotesObject(obj: R2ObjectBody): Promise<StudyNote[]> {
+  const payload = (await obj.json()) as {
+    data?: { notes?: StudyNote[] };
+  };
+  return payload?.data?.notes ?? [];
+}
+
+async function loadChapterNotes(
+  c: Context<{ Bindings: Env }>,
+  bible: Bible,
+  bookId: string,
+  chapter: string
+): Promise<StudyNote[]> {
+  if (!bible.features.includes("notes")) return [];
+  const obj = await c.env.BIBLE_BUCKET.get(
+    `${bible.id}/notes/${bookId}/${chapter}.json`
+  );
+  if (!obj) return [];
+  return parseNotesObject(obj);
 }
 
 async function fetchR2Json(

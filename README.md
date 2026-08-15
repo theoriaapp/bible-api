@@ -3,13 +3,26 @@ Build a Bible API hosted on Cloudflare Workers
 
 ![Tests](https://github.com/theoriaapp/bible-api/actions/workflows/tests.yml/badge.svg)
 
+## Supported bibles
+- `NKJV` — New King James Version.
+- `OSB` — Orthodox Study Bible. LXX-based Old Testament (Greek versification: Psalms 1–151 with Psalm 151, 2 Chronicles 37 = Prayer of Manasseh, Joel has 4 chapters) plus the deuterocanonical books (Tobit, Judith, 1–3 Maccabees, Wisdom of Solomon, Sirach, Baruch, Letter of Jeremiah, Susanna, Bel and the Dragon, 1 Esdras; `testament: "DC"` in the books manifest). The New Testament text is the NKJV. Includes study notes (`features: ["notes"]`).
+
+Note: verse ids are **not** interchangeable across bibles — the OSB Old Testament follows Septuagint numbering, so e.g. `PSA.23.1` refers to different text in NKJV vs OSB.
+
+## Study notes (OSB)
+- `GET /v1/bibles/OSB/chapters/GEN.1/notes` — notes anchored within a chapter, in document order. Each note: `{ id, type, verseId, text, sequence }` where `type` is `intro` | `inline` | `sidebar` | `footnote` | `unclear`. Sidebar notes are section headings/article titles; inline notes are study-article paragraphs.
+- `GET /v1/bibles/OSB/books/GEN/intro` — book introduction (Author, Date, Major Theme, Background).
+- `?include-notes=true` on chapter and verse endpoints embeds the relevant notes in the response.
+- Requesting notes for a bible without the `notes` feature returns `404 NOTES_NOT_AVAILABLE`.
+
 ## Setup
 1. Install deps: `npm install`
 2. Copy env template: `cp env.example .env`
 3. Fill `.env` with your R2 credentials and bucket name.
-4. Seed R2: `npm run seed`
-5. Set `API_KEY` in `wrangler.toml` (or run `wrangler dev --var API_KEY=...`)
-6. Deploy: `npm run deploy`
+4. Seed R2 with NKJV: `npm run seed`
+5. Seed R2 with OSB: `npm run seed:osb` (reads `~/Downloads/osb.db` by default; override with `--db /path/to/osb.db` or `OSB_DB_PATH`; use `--dry-run --out DIR` to write JSON locally instead of uploading)
+6. Set `API_KEY` in `wrangler.toml` (or run `wrangler dev --var API_KEY=...`)
+7. Deploy: `npm run deploy`
 
 ## OpenAPI docs (Hono OpenAPI)
 Public OpenAPI JSON:
@@ -47,7 +60,9 @@ All error responses use the shape:
 
 Common codes:
 - `UNAUTHORIZED` - Missing or invalid `api-key` header
-- `BIBLE_NOT_FOUND` - Unknown bible id (only `NKJV` is supported)
+- `BIBLE_NOT_FOUND` - Unknown bible id (supported: `NKJV`, `OSB`)
+- `NOTES_NOT_AVAILABLE` - Study notes requested for a bible without the `notes` feature
+- `INVALID_BOOK_ID` - Unknown book code for the requested bible
 - `INVALID_CHAPTER_ID` - Bad chapter format (expected `BOOK.CHAPTER`, e.g. `GEN.1`)
 - `INVALID_PASSAGE_ID` - Bad passage format (expected `BOOK.CHAPTER.START-BOOK.CHAPTER.END`)
 - `INVALID_PASSAGE_RANGE` - Passage end must be after the start

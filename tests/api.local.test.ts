@@ -84,6 +84,84 @@ const mockData = {
       ]
     },
     meta: {}
+  },
+  "OSB/books.json": {
+    data: [
+      { id: "GEN", name: "Genesis", abbreviation: "GEN", chapters: 50, testament: "OT" },
+      { id: "TOB", name: "Tobit", abbreviation: "TOB", chapters: 14, testament: "DC" }
+    ],
+    meta: {}
+  },
+  "OSB/GEN/1.json": {
+    data: {
+      id: "GEN.1",
+      bibleId: "OSB",
+      content: [
+        { id: "GEN.1.1", text: "In the beginning God made heaven and earth." },
+        { id: "GEN.1.2", text: "The earth was invisible and unfinished..." }
+      ]
+    },
+    meta: {}
+  },
+  "OSB/notes/GEN/1.json": {
+    data: {
+      id: "GEN.1",
+      bibleId: "OSB",
+      notes: [
+        {
+          id: "n11",
+          type: "sidebar",
+          verseId: "GEN.1.1",
+          text: "THE HOLY TRINITY",
+          sequence: 1
+        },
+        {
+          id: "n12",
+          type: "inline",
+          verseId: "GEN.1.2",
+          text: "The Holy Trinity is revealed in both testaments.",
+          sequence: 2
+        }
+      ]
+    },
+    meta: {}
+  },
+  "OSB/notes/GEN/intro.json": {
+    data: {
+      bookId: "GEN",
+      bibleId: "OSB",
+      notes: [
+        {
+          id: "n1",
+          type: "intro",
+          verseId: null,
+          text: "Author — Traditionally Moses.",
+          sequence: 1
+        }
+      ]
+    },
+    meta: {}
+  },
+  "OSB/PSA/151.json": {
+    data: {
+      id: "PSA.151",
+      bibleId: "OSB",
+      content: [
+        { id: "PSA.151.1", text: "This is a psalm written with David's own hand..." }
+      ]
+    },
+    meta: {}
+  },
+  "OSB/TOB/1.json": {
+    data: {
+      id: "TOB.1",
+      bibleId: "OSB",
+      content: [
+        { id: "TOB.1.1", text: "The book of the words of Tobit..." },
+        { id: "TOB.1.2", text: "who in the days of Shalmaneser..." }
+      ]
+    },
+    meta: {}
   }
 };
 
@@ -120,7 +198,22 @@ describe("API (local)", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(Array.isArray(body.data)).toBe(true);
-    expect(body.data[0].id).toBe("NKJV");
+    const ids = body.data.map((bible: { id: string }) => bible.id);
+    expect(ids).toContain("NKJV");
+    expect(ids).toContain("OSB");
+    const osb = body.data.find((bible: { id: string }) => bible.id === "OSB");
+    expect(osb.features).toContain("notes");
+  });
+
+  test("GET /v1/bibles/UNKNOWN/books returns BIBLE_NOT_FOUND", async () => {
+    const res = await app.request(
+      "/v1/bibles/UNKNOWN/books",
+      { headers: { "api-key": env.API_KEY } },
+      env
+    );
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.error.code).toBe("BIBLE_NOT_FOUND");
   });
 
   test("GET /v1/bibles/NKJV/books", async () => {
@@ -169,6 +262,138 @@ describe("API (local)", () => {
     const body = await res.json();
     expect(body.data.id).toBe("GEN.1.1");
     expect(body.data.text).toBe("In the beginning...");
+  });
+
+  test("GET /v1/bibles/OSB/books", async () => {
+    const res = await app.request(
+      "/v1/bibles/OSB/books",
+      { headers: { "api-key": env.API_KEY } },
+      env
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data[0].id).toBe("GEN");
+    expect(body.data[1].testament).toBe("DC");
+  });
+
+  test("GET /v1/bibles/OSB/chapters/GEN.1", async () => {
+    const res = await app.request(
+      "/v1/bibles/OSB/chapters/GEN.1",
+      { headers: { "api-key": env.API_KEY } },
+      env
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data.id).toBe("GEN.1");
+    expect(body.data.bibleId).toBe("OSB");
+    expect(body.data.notes).toBeUndefined();
+  });
+
+  test("GET /v1/bibles/OSB/chapters/GEN.1?include-notes=true", async () => {
+    const res = await app.request(
+      "/v1/bibles/OSB/chapters/GEN.1?include-notes=true",
+      { headers: { "api-key": env.API_KEY } },
+      env
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data.content.length).toBe(2);
+    expect(body.data.notes.length).toBe(2);
+    expect(body.data.notes[0].verseId).toBe("GEN.1.1");
+  });
+
+  test("GET /v1/bibles/OSB/chapters/GEN.1/notes", async () => {
+    const res = await app.request(
+      "/v1/bibles/OSB/chapters/GEN.1/notes",
+      { headers: { "api-key": env.API_KEY } },
+      env
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data.id).toBe("GEN.1");
+    expect(body.data.notes.length).toBe(2);
+    expect(body.data.notes[0].type).toBe("sidebar");
+  });
+
+  test("GET /v1/bibles/NKJV/chapters/GEN.1/notes returns NOTES_NOT_AVAILABLE", async () => {
+    const res = await app.request(
+      "/v1/bibles/NKJV/chapters/GEN.1/notes",
+      { headers: { "api-key": env.API_KEY } },
+      env
+    );
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.error.code).toBe("NOTES_NOT_AVAILABLE");
+  });
+
+  test("GET /v1/bibles/OSB/books/GEN/intro", async () => {
+    const res = await app.request(
+      "/v1/bibles/OSB/books/GEN/intro",
+      { headers: { "api-key": env.API_KEY } },
+      env
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data.bookId).toBe("GEN");
+    expect(body.data.notes[0].type).toBe("intro");
+  });
+
+  test("GET /v1/bibles/OSB/verses/GEN.1.2?include-notes=true", async () => {
+    const res = await app.request(
+      "/v1/bibles/OSB/verses/GEN.1.2?include-notes=true",
+      { headers: { "api-key": env.API_KEY } },
+      env
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data.id).toBe("GEN.1.2");
+    expect(body.data.bibleId).toBe("OSB");
+    expect(body.data.notes.length).toBe(1);
+    expect(body.data.notes[0].id).toBe("n12");
+  });
+
+  test("OSB accepts Psalm 151, NKJV rejects it", async () => {
+    const osbRes = await app.request(
+      "/v1/bibles/OSB/chapters/PSA.151",
+      { headers: { "api-key": env.API_KEY } },
+      env
+    );
+    expect(osbRes.status).toBe(200);
+    const osbBody = await osbRes.json();
+    expect(osbBody.data.id).toBe("PSA.151");
+
+    const nkjvRes = await app.request(
+      "/v1/bibles/NKJV/chapters/PSA.151",
+      { headers: { "api-key": env.API_KEY } },
+      env
+    );
+    expect(nkjvRes.status).toBe(400);
+    const nkjvBody = await nkjvRes.json();
+    expect(nkjvBody.error.code).toBe("INVALID_CHAPTER_ID");
+  });
+
+  test("GET /v1/search?q=Tobit 1:1-2&bibleId=OSB (deuterocanonical)", async () => {
+    const res = await app.request(
+      "/v1/search?q=Tobit%201:1-2&bibleId=OSB",
+      { headers: { "api-key": env.API_KEY } },
+      env
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data.bibleId).toBe("OSB");
+    expect(body.data.content.length).toBe(2);
+    expect(body.data.content[0].id).toBe("TOB.1.1");
+  });
+
+  test("GET /v1/search with unknown bibleId returns BIBLE_NOT_FOUND", async () => {
+    const res = await app.request(
+      "/v1/search?q=GEN1:1&bibleId=XYZ",
+      { headers: { "api-key": env.API_KEY } },
+      env
+    );
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.error.code).toBe("BIBLE_NOT_FOUND");
   });
 
   test("GET /v1/search?q=John 6:12-15 NKJV", async () => {

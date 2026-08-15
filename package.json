@@ -7,6 +7,7 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "seed": "tsx src/seed-r2.ts",
+    "seed:osb": "tsx src/seed-osb.ts",
     "test:local": "vitest run tests/api.local.test.ts",
     "test:prod": "vitest run tests/api.prod.test.ts"
   },
