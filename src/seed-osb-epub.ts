@@ -161,11 +161,20 @@ async function main() {
       }
       // Pericope headings group the notes that follow them; a heading whose
       // section has no notes in this chapter (its prose falls under an
-      // earlier range note or the next chapter) would dangle at the bottom
-      // of the sheet — drop trailing headings, and skip heading-only files.
-      while (notes.length > 0 && notes[notes.length - 1].type === "sidebar") {
-        notes.pop();
+      // earlier range note or the next chapter) would sit empty in the
+      // sheet — keep a heading only when prose follows before the next
+      // heading, and skip chapters left with no notes at all.
+      const kept: SeedNote[] = [];
+      for (let i = 0; i < notes.length; i += 1) {
+        if (notes[i].type !== "sidebar") {
+          kept.push(notes[i]);
+          continue;
+        }
+        const next = notes[i + 1];
+        if (next && next.type !== "sidebar") kept.push(notes[i]);
       }
+      notes.length = 0;
+      notes.push(...kept);
       if (notes.length === 0) continue;
       notes.forEach((n, i) => {
         n.sequence = i + 1;
