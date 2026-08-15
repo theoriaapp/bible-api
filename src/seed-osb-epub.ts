@@ -278,12 +278,15 @@ function note(bookId: string, chapter: number, index: number, type: string, vers
   return { id: `${bookId}.${chapter}.n${index + 1}`, type, verseId, text, sequence: index + 1 };
 }
 
-// Book intros keep their print structure: short un-punctuated lines
-// ("Author", "Date", "Major Theme") become sidebar headings.
+// Book intros keep their print structure. The print heading vocabulary is
+// fixed (verified across all 76 intros in the EPUB); everything else —
+// answers like "Unknown", outline entries — reads as prose.
+const INTRO_HEADINGS = /^(Author|Date|Outline|Background|Major Themes?)$/;
+
 function introToNotes(bookId: string, entry: ExtractedNote): SeedNote[] {
   const notes: SeedNote[] = [];
   for (const para of paragraphs(entry.text)) {
-    const isHeading = para.length <= 48 && !/[.!?:;]$/.test(para) && !/\n/.test(para);
+    const isHeading = INTRO_HEADINGS.test(para);
     notes.push({
       id: `${bookId}.intro.n${notes.length + 1}`,
       type: isHeading ? "sidebar" : "intro",
