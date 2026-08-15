@@ -159,6 +159,18 @@ async function main() {
           notes.push(n);
         }
       }
+      // Pericope headings group the notes that follow them; a heading whose
+      // section has no notes in this chapter (its prose falls under an
+      // earlier range note or the next chapter) would dangle at the bottom
+      // of the sheet — drop trailing headings, and skip heading-only files.
+      while (notes.length > 0 && notes[notes.length - 1].type === "sidebar") {
+        notes.pop();
+      }
+      if (notes.length === 0) continue;
+      notes.forEach((n, i) => {
+        n.sequence = i + 1;
+        n.id = `${bookId}.${chapter}.n${i + 1}`;
+      });
       chapterNotes.set(`${bookId}/${chapter}`, notes);
     }
   }
