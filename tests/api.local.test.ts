@@ -3,6 +3,7 @@ import { app } from "../src/index.js";
 
 type R2Object = {
   body: string;
+  httpEtag: string;
   httpMetadata?: { contentType?: string };
   json: () => Promise<unknown>;
 };
@@ -11,6 +12,7 @@ function createR2Object(payload: unknown): R2Object {
   const body = JSON.stringify(payload);
   return {
     body,
+    httpEtag: `"etag-${body.length}"`,
     httpMetadata: { contentType: "application/json" },
     json: async () => payload
   };
@@ -162,6 +164,23 @@ const mockData = {
       ]
     },
     meta: {}
+  },
+  "OSB/bundle.json": {
+    data: {
+      bibleId: "OSB",
+      revision: "abc123",
+      books: [
+        { id: "GEN", name: "Genesis", abbreviation: "GEN", chapters: 50, testament: "OT" }
+      ],
+      chapters: {
+        "GEN.1": [{ id: "GEN.1.1", text: "In the beginning God made heaven and earth." }]
+      },
+      notes: {
+        chapters: { "GEN.1": [] },
+        intros: { GEN: [] }
+      }
+    },
+    meta: { generatedAt: "2026-01-01T00:00:00.000Z" }
   }
 };
 
@@ -394,6 +413,66 @@ describe("API (local)", () => {
     expect(res.status).toBe(404);
     const body = await res.json();
     expect(body.error.code).toBe("BIBLE_NOT_FOUND");
+  });
+
+  test("GET /v1/bibles/OSB/download returns the offline bundle", async () => {
+    const res = await app.request(
+      "/v1/bibles/OSB/download",
+      { headers: { "api-key": env.API_KEY } },
+      env
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("etag")).toBeTruthy();
+    expect(res.headers.get("cache-control")).toContain("private");
+    const body = await res.json();
+    expect(body.data.bibleId).toBe("OSB");
+    expect(body.data.revision).toBe("abc123");
+    expect(body.data.chapters["GEN.1"].length).toBe(1);
+  });
+
+  test("GET /v1/bibles/OSB/download honors If-None-Match with 304", async () => {
+    const first = await app.request(
+      "/v1/bibles/OSB/download",
+      { headers: { "api-key": env.API_KEY } },
+      env
+    );
+    const etag = first.headers.get("etag")!;
+    const second = await app.request(
+      "/v1/bibles/OSB/download",
+      { headers: { "api-key": env.API_KEY, "if-none-match": etag } },
+      env
+    );
+    expect(second.status).toBe(304);
+  });
+
+  test("GET /v1/bibles/NKJV/download without bundle returns DOWNLOAD_NOT_AVAILABLE", async () => {
+    const res = await app.request(
+      "/v1/bibles/NKJV/download",
+      { headers: { "api-key": env.API_KEY } },
+      env
+    );
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.error.code).toBe("DOWNLOAD_NOT_AVAILABLE");
+  });
+
+  test("content endpoints send cache headers and honor If-None-Match", async () => {
+    const first = await app.request(
+      "/v1/bibles/NKJV/chapters/GEN.1",
+      { headers: { "api-key": env.API_KEY } },
+      env
+    );
+    expect(first.status).toBe(200);
+    expect(first.headers.get("cache-control")).toContain("private");
+    const etag = first.headers.get("etag")!;
+    expect(etag).toBeTruthy();
+
+    const second = await app.request(
+      "/v1/bibles/NKJV/chapters/GEN.1",
+      { headers: { "api-key": env.API_KEY, "if-none-match": etag } },
+      env
+    );
+    expect(second.status).toBe(304);
   });
 
   test("GET /v1/search?q=John 6:12-15 NKJV", async () => {

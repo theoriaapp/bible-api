@@ -81,6 +81,14 @@ const errorExamples = {
       }
     }
   },
+  downloadNotAvailable: {
+    value: {
+      error: {
+        code: "DOWNLOAD_NOT_AVAILABLE",
+        message: "No offline bundle has been published for this bible."
+      }
+    }
+  },
   invalidChapterId: {
     value: {
       error: {
@@ -367,6 +375,71 @@ app.get(
 );
 
 app.get(
+  "/v1/bibles/:bibleId/download",
+  describeRoute({
+    summary: "Download a complete bible for offline use",
+    description:
+      "Download the full bible (text plus study notes where available) as a single JSON bundle for offline storage. The bundle uses the same shapes as the online API: data.chapters is keyed by chapter id (e.g. GEN.1), data.notes.chapters by chapter id, data.notes.intros by book id. data.revision is a content hash; send If-None-Match with the previously returned ETag to get 304 Not Modified when your local copy is still current.",
+    responses: {
+      200: {
+        description:
+          "OK. The complete bible bundle: { data: { bibleId, revision, books, chapters, notes? }, meta }.",
+        content: { "application/json": {} }
+      },
+      304: { description: "Not modified — the local copy is current." },
+      401: {
+        description: "Unauthorized",
+        content: {
+          "application/json": {
+            schema: resolver(errorResponse),
+            examples: { unauthorized: errorExamples.unauthorized }
+          }
+        }
+      },
+      404: {
+        description: "Not found",
+        content: {
+          "application/json": {
+            schema: resolver(errorResponse),
+            examples: {
+              bibleNotFound: errorExamples.bibleNotFound,
+              downloadNotAvailable: errorExamples.downloadNotAvailable
+            }
+          }
+        }
+      }
+    }
+  }),
+  validator("param", bibleIdParam),
+  async (c) => {
+    const { bibleId } = c.req.valid("param");
+    const bible = getBible(bibleId);
+    if (!bible) {
+      return c.json(bibleNotFoundError, 404);
+    }
+
+    const obj = await c.env.BIBLE_BUCKET.get(`${bible.id}/bundle.json`);
+    if (!obj) {
+      return c.json(errorExamples.downloadNotAvailable.value, 404);
+    }
+
+    const etag = obj.httpEtag;
+    const headers: Record<string, string> = {
+      etag,
+      "cache-control": "private, max-age=3600"
+    };
+    if (c.req.header("if-none-match") === etag) {
+      return c.body(null, 304, headers);
+    }
+
+    return c.body(obj.body, 200, {
+      ...headers,
+      "content-type": "application/json"
+    });
+  }
+);
+
+app.get(
   "/v1/bibles/:bibleId/chapters/:chapterId",
   describeRoute({
     summary: "Fetch a chapter by id",
@@ -460,6 +533,7 @@ app.get(
   };
   const notes = await loadChapterNotes(c, bible, parsed.bookId, parsed.chapter);
 
+  c.header("cache-control", CONTENT_CACHE_CONTROL);
   return c.json({
     data: { ...(chapterData?.data ?? {}), notes },
     meta: chapterData?.meta ?? {}
@@ -568,6 +642,7 @@ app.get(
       data.notes = notes.filter((note) => note.verseId === normalizedVerseId);
     }
 
+    c.header("cache-control", CONTENT_CACHE_CONTROL);
     return c.json({ data, meta: {} });
   }
 );
@@ -660,6 +735,7 @@ app.get(
     }
 
     const notes = await loadChapterNotes(c, bible, parsed.bookId, parsed.chapter);
+    c.header("cache-control", CONTENT_CACHE_CONTROL);
     return c.json({
       data: {
         id: `${parsed.bookId}.${parsed.chapter}`,
@@ -755,6 +831,7 @@ app.get(
     );
     const notes = obj ? await parseNotesObject(obj) : [];
 
+    c.header("cache-control", CONTENT_CACHE_CONTROL);
     return c.json({
       data: {
         bookId: resolvedBookId,
@@ -1022,6 +1099,7 @@ app.get(
     return c.json({ error: passageResult.error }, passageResult.status);
   }
 
+  c.header("cache-control", CONTENT_CACHE_CONTROL);
   return c.json({
     data: {
       id: passageId,
@@ -1392,6 +1470,12 @@ async function loadChapterNotes(
   return parseNotesObject(obj);
 }
 
+// Bible content is immutable, so let clients cache it. `private` (not
+// `public`) because responses are gated by the api-key header: shared caches
+// (including Cloudflare's edge cache for Workers, if ever enabled) key on the
+// URL and would serve cached content to unauthenticated requests.
+const CONTENT_CACHE_CONTROL = "private, max-age=86400";
+
 async function fetchR2Json(
   c: Context<{ Bindings: Env }>,
   key: string
@@ -1403,7 +1487,17 @@ async function fetchR2Json(
       404
     );
   }
+
+  const headers: Record<string, string> = {
+    etag: obj.httpEtag,
+    "cache-control": CONTENT_CACHE_CONTROL
+  };
+  if (c.req.header("if-none-match") === obj.httpEtag) {
+    return c.body(null, 304, headers);
+  }
+
   return c.body(obj.body, 200, {
+    ...headers,
     "content-type": obj.httpMetadata?.contentType ?? "application/json"
   });
 }

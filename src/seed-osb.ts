@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { buildBundle } from "./bundle.js";
 import { OSB_BOOKS } from "./mappings.js";
 
 /**
@@ -54,12 +55,14 @@ function parseArgs() {
   const opts = {
     db: process.env.OSB_DB_PATH ?? join(homedir(), "Downloads", "osb.db"),
     out: "osb-out",
-    dryRun: false
+    dryRun: false,
+    bundleOnly: false
   };
   for (let i = 0; i < args.length; i += 1) {
     if (args[i] === "--db") opts.db = args[++i];
     else if (args[i] === "--out") opts.out = args[++i];
     else if (args[i] === "--dry-run") opts.dryRun = true;
+    else if (args[i] === "--bundle-only") opts.bundleOnly = true;
   }
   return opts;
 }
@@ -225,6 +228,7 @@ async function main() {
   }
 
   const introSummary: string[] = [];
+  const introNotes = new Map<string, StudyNote[]>();
   blocks.forEach((block, index) => {
     const bookId = INTRO_BOOK_ORDER[index];
     const notes: StudyNote[] = block.map((row, noteIndex) => ({
@@ -234,6 +238,7 @@ async function main() {
       text: cleanNoteText(row.note_text),
       sequence: noteIndex + 1
     }));
+    introNotes.set(bookId, notes);
     introSummary.push(
       `${bookId}: ${notes.length} notes (${notes[0].text.slice(0, 60)}...)`
     );
@@ -265,6 +270,17 @@ async function main() {
     }
   });
 
+  // --- Offline bundle ---------------------------------------------------
+  const bundle = buildBundle({
+    bibleId: BIBLE_ID,
+    books: OSB_BOOKS,
+    chapters: chapterMap,
+    chapterNotes,
+    introNotes
+  });
+  uploads.push({ key: `${BIBLE_ID}/bundle.json`, payload: bundle });
+  console.log(`Bundle revision: ${bundle.data.revision}`);
+
   // --- Validate against the registry ------------------------------------
   const chapterCounts = new Map<string, number>();
   for (const key of chapterMap.keys()) {
@@ -295,14 +311,18 @@ async function main() {
   for (const line of introSummary) console.log(`  ${line}`);
 
   // --- Write ------------------------------------------------------------
+  const toWrite = opts.bundleOnly
+    ? uploads.filter((upload) => upload.key === `${BIBLE_ID}/bundle.json`)
+    : uploads;
+
   if (opts.dryRun) {
     const outDir = resolve(opts.out);
-    for (const { key, payload } of uploads) {
+    for (const { key, payload } of toWrite) {
       const filePath = join(outDir, key);
       mkdirSync(join(filePath, ".."), { recursive: true });
       writeFileSync(filePath, JSON.stringify(payload, null, 2));
     }
-    console.log(`\nDry run: wrote ${uploads.length} files under ${outDir}.`);
+    console.log(`\nDry run: wrote ${toWrite.length} files under ${outDir}.`);
     return;
   }
 
@@ -323,7 +343,7 @@ async function main() {
   });
 
   let uploaded = 0;
-  for (const { key, payload } of uploads) {
+  for (const { key, payload } of toWrite) {
     await s3.send(
       new PutObjectCommand({
         Bucket: bucket,
@@ -334,7 +354,7 @@ async function main() {
     );
     uploaded += 1;
     if (uploaded % 100 === 0) {
-      console.log(`Uploaded ${uploaded}/${uploads.length}...`);
+      console.log(`Uploaded ${uploaded}/${toWrite.length}...`);
     }
   }
   console.log(`Done. Uploaded ${uploaded} objects.`);

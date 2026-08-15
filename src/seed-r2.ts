@@ -2,7 +2,10 @@ import "dotenv/config";
 import axios from "axios";
 import { XMLParser } from "fast-xml-parser";
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { buildBundle, type BundleVerse } from "./bundle.js";
 import { BOOKS, bookNameToId } from "./mappings.js";
+
+const BUNDLE_ONLY = process.argv.includes("--bundle-only");
 
 const XML_URL =
   "https://raw.githubusercontent.com/rwev/bible/refs/heads/master/bible/translations/NKJV.xml";
@@ -65,6 +68,7 @@ async function seed() {
     throw new Error("No books found in XML.");
   }
 
+  const chapterMap = new Map<string, BundleVerse[]>();
   for (const book of books) {
     const bookName = book?.n?.trim();
     if (!bookName) continue;
@@ -99,6 +103,9 @@ async function seed() {
         .filter(Boolean);
 
       const chapterId = `${bookId}.${chapterNumber}`;
+      chapterMap.set(`${bookId}/${chapterNumber}`, content as BundleVerse[]);
+      if (BUNDLE_ONLY) continue;
+
       const payload = {
         data: {
           id: chapterId,
@@ -114,17 +121,28 @@ async function seed() {
     }
   }
 
-  console.log("Uploading books manifest...");
-  const booksPayload = {
-    data: BOOKS.map((book) => ({
-      id: book.id,
-      name: book.name,
-      abbreviation: book.id,
-      chapters: book.chapters
-    })),
-    meta: {}
-  };
-  await uploadJson("NKJV/books.json", booksPayload);
+  if (!BUNDLE_ONLY) {
+    console.log("Uploading books manifest...");
+    const booksPayload = {
+      data: BOOKS.map((book) => ({
+        id: book.id,
+        name: book.name,
+        abbreviation: book.id,
+        chapters: book.chapters
+      })),
+      meta: {}
+    };
+    await uploadJson("NKJV/books.json", booksPayload);
+  }
+
+  console.log("Uploading offline bundle...");
+  const bundle = buildBundle({
+    bibleId: "NKJV",
+    books: BOOKS,
+    chapters: chapterMap
+  });
+  await uploadJson("NKJV/bundle.json", bundle);
+  console.log(`Bundle revision: ${bundle.data.revision}`);
 
   console.log("Done.");
 }

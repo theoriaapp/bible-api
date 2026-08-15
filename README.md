@@ -15,6 +15,14 @@ Note: verse ids are **not** interchangeable across bibles — the OSB Old Testam
 - `?include-notes=true` on chapter and verse endpoints embeds the relevant notes in the response.
 - Requesting notes for a bible without the `notes` feature returns `404 NOTES_NOT_AVAILABLE`.
 
+## Offline download
+`GET /v1/bibles/:bibleId/download` returns the complete bible (text plus study notes where available) as one JSON bundle (~6.5 MB raw, ~2 MB over the wire) for client apps that want offline storage. The bundle mirrors the online API shapes: `data.chapters` keyed by chapter id, `data.notes.chapters` / `data.notes.intros` for study notes, and `data.revision` (content hash). To check for updates, repeat the request with `If-None-Match: <previous ETag>` — a `304` means the local copy is current.
+
+Bundles are pre-built at seed time (`{BIBLE}/bundle.json` in R2). To rebuild just the bundle: `npm run seed -- --bundle-only` (NKJV) or `npm run seed:osb -- --bundle-only` (OSB).
+
+## Caching
+Content endpoints send `Cache-Control: private, max-age=86400` and an `ETag` (with `If-None-Match`/304 support). `private` is deliberate: responses are gated by the `api-key` header, and shared caches key on the URL — this includes the Workers dashboard "Cache" runtime setting, which should stay **disabled** (it would serve cached responses without checking auth, and caches responses lacking Cache-Control for ~2h by default).
+
 ## Setup
 1. Install deps: `npm install`
 2. Copy env template: `cp env.example .env`
@@ -63,6 +71,7 @@ Common codes:
 - `BIBLE_NOT_FOUND` - Unknown bible id (supported: `NKJV`, `OSB`)
 - `NOTES_NOT_AVAILABLE` - Study notes requested for a bible without the `notes` feature
 - `INVALID_BOOK_ID` - Unknown book code for the requested bible
+- `DOWNLOAD_NOT_AVAILABLE` - No offline bundle published for the requested bible
 - `INVALID_CHAPTER_ID` - Bad chapter format (expected `BOOK.CHAPTER`, e.g. `GEN.1`)
 - `INVALID_PASSAGE_ID` - Bad passage format (expected `BOOK.CHAPTER.START-BOOK.CHAPTER.END`)
 - `INVALID_PASSAGE_RANGE` - Passage end must be after the start
