@@ -19,6 +19,8 @@ export type BundleNote = {
   verseId: string | null;
   text: string;
   sequence: number;
+  /** Printed verse reference for study/lectionary notes, e.g. "1:31". */
+  label?: string;
 };
 
 export type BibleBundle = {

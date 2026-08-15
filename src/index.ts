@@ -186,10 +186,11 @@ const booksResponse = z.object({
 
 const noteSchema = z.object({
   id: z.string(),
-  type: z.enum(["inline", "footnote", "intro", "sidebar", "unclear"]),
+  type: z.enum(["inline", "footnote", "intro", "sidebar", "unclear", "study", "lectionary", "article"]),
   verseId: z.string().nullable(),
   text: z.string(),
-  sequence: z.number()
+  sequence: z.number(),
+  label: z.string().optional()
 });
 
 const chapterResponse = z.object({
@@ -1447,6 +1448,8 @@ type StudyNote = {
   verseId: string | null;
   text: string;
   sequence: number;
+  /** Printed verse reference for study/lectionary notes, e.g. "1:31". */
+  label?: string;
 };
 
 async function parseNotesObject(obj: R2ObjectBody): Promise<StudyNote[]> {
